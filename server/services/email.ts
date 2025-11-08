@@ -23,6 +23,13 @@ function getTransporter(): Transporter {
       throw new Error('SMTP_PASSWORD environment variable is not set');
     }
 
+    console.log('[EMAIL] Initializing SMTP transporter', {
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      user: SMTP_USER,
+      from: FROM_EMAIL,
+    });
+
     transporter = nodemailer.createTransport({
       host: SMTP_HOST,
       port: SMTP_PORT,
@@ -46,19 +53,44 @@ interface SendEmailOptions {
 
 export async function sendEmail(options: SendEmailOptions): Promise<void> {
   const transport = getTransporter();
+  const start = Date.now();
 
-  await transport.sendMail({
-    from: FROM_EMAIL,
+  console.log('[EMAIL] sending', {
     to: options.to,
     subject: options.subject,
-    html: options.html,
-    text: options.text || options.html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
+    at: new Date().toISOString(),
   });
+
+  try {
+    await transport.sendMail({
+      from: FROM_EMAIL,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text || options.html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
+    });
+
+    console.log('[EMAIL] sent', {
+      to: options.to,
+      subject: options.subject,
+      ms: Date.now() - start,
+      at: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('[EMAIL] send failed', {
+      to: options.to,
+      subject: options.subject,
+      ms: Date.now() - start,
+      at: new Date().toISOString(),
+      error,
+    });
+    throw error;
+  }
 }
 
 export async function sendVerificationEmail(email: string, username: string, token: string): Promise<void> {
   const baseUrl = process.env.APP_URL || 'https://xnrt.org';
-  
+
   await sendEmail({
     to: email,
     subject: 'Verify Your Email - XNRT Platform',
@@ -68,7 +100,7 @@ export async function sendVerificationEmail(email: string, username: string, tok
 
 export async function sendPasswordResetEmail(email: string, username: string, token: string): Promise<void> {
   const baseUrl = process.env.APP_URL || 'https://xnrt.org';
-  
+
   await sendEmail({
     to: email,
     subject: 'Reset Your Password - XNRT Platform',
@@ -78,7 +110,7 @@ export async function sendPasswordResetEmail(email: string, username: string, to
 
 export async function sendWelcomeEmail(email: string, username: string): Promise<void> {
   const baseUrl = process.env.APP_URL || 'https://xnrt.org';
-  
+
   await sendEmail({
     to: email,
     subject: 'Welcome to XNRT - Start Earning Today!',
@@ -108,7 +140,7 @@ export async function sendWithdrawalNotification(
   walletAddress?: string
 ): Promise<void> {
   const statusText = status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Pending';
-  
+
   await sendEmail({
     to: email,
     subject: `Withdrawal ${statusText}: ${amount.toLocaleString()} XNRT`,

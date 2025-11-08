@@ -22,7 +22,7 @@ export default function VerifyEmailPage() {
         title: 'Email Verified!',
         description: 'Your email has been successfully verified. Redirecting to dashboard...',
       });
-      
+
       // Redirect to home after 2 seconds
       setTimeout(() => {
         setLocation('/');
@@ -42,7 +42,7 @@ export default function VerifyEmailPage() {
     // Extract token from URL
     const params = new URLSearchParams(window.location.search);
     const tokenParam = params.get('token');
-    
+
     if (tokenParam) {
       setToken(tokenParam);
       // Auto-verify when token is present
@@ -71,18 +71,18 @@ export default function VerifyEmailPage() {
             {verifyEmailMutation.isError && <XCircle className="w-8 h-8 text-black" />}
             {!token && <Mail className="w-8 h-8 text-black" />}
           </div>
-          
+
           <CardTitle className="text-2xl font-bold text-amber-500">
             {verifyEmailMutation.isPending && 'Verifying Email...'}
             {verifyEmailMutation.isSuccess && 'Email Verified!'}
             {verifyEmailMutation.isError && 'Verification Failed'}
             {!token && 'Email Verification'}
           </CardTitle>
-          
+
           <CardDescription className="text-gray-400">
             {verifyEmailMutation.isPending && 'Please wait while we verify your email address.'}
             {verifyEmailMutation.isSuccess && 'Your email has been successfully verified. You can now access all features.'}
-            {verifyEmailMutation.isError && 'We couldn\'t verify your email. The link may be expired or invalid.'}
+            {verifyEmailMutation.isError && "We couldn't verify your email. The link may be expired or invalid."}
             {!token && 'No verification token found. Please check your email for the verification link.'}
           </CardDescription>
         </CardHeader>
@@ -105,7 +105,7 @@ export default function VerifyEmailPage() {
                 <Mail className="w-4 h-4 mr-2" />
                 Resend Verification Email
               </Button>
-              
+
               <Button
                 onClick={() => setLocation('/auth')}
                 variant="outline"

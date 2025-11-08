@@ -20,7 +20,7 @@ export default function Register() {
   // Auto-capture referral code from URL parameter on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const refCode = params.get('ref');
+    const refCode = params.get("ref");
     if (refCode) {
       setReferralCode(refCode);
       toast({
@@ -65,7 +65,7 @@ export default function Register() {
 
       toast({
         title: "Registration successful",
-        description: "Welcome to XNRT!",
+        description: "Welcome to XNRT! We've sent you a verification email.",
       });
 
       // Redirect to home
@@ -85,7 +85,7 @@ export default function Register() {
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
       <CosmicBackground />
-      
+
       <Card className="relative z-10 w-full max-w-md mx-4">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
