@@ -90,6 +90,14 @@ model Stake {
   createdAt      DateTime  @default(now()) @db.Timestamp(6)
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "Stake_userId_User_id_fk")
 
+  // ---- Trust Loan fields (NEW) ----
+  isLoan                     Boolean  @default(false)
+  loanProgram                String?
+  unlockMet                  Boolean  @default(false)
+  requiredReferrals          Int      @default(10)
+  requiredInvestingReferrals Int      @default(3)
+  minInvestUsdtPerReferral   Decimal  @default(50.0) @db.Decimal(38, 18)
+
   @@index([status], map: "stakes_status_idx")
   @@index([userId, createdAt], map: "stakes_userId_createdAt_idx")
   @@index([userId], map: "stakes_userId_idx")
@@ -203,11 +211,17 @@ model UserAchievement {
   userId        String      @db.VarChar
   achievementId String      @db.VarChar
   unlockedAt    DateTime    @default(now()) @db.Timestamp(6)
+
+  // --- CLAIM FIELDS ---
+  claimed       Boolean     @default(false)
+  claimedAt     DateTime?   @db.Timestamp(6)
+
   achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "UserAchievement_achievementId_Achievement_id_fk")
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "UserAchievement_userId_User_id_fk")
 
   @@index([achievementId], map: "user_achievements_achievementId_idx")
   @@index([userId], map: "user_achievements_userId_idx")
+  @@unique([userId, achievementId], map: "user_achievements_user_achievement_unique")
 }
 
 model Activity {

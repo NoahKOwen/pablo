@@ -1,3 +1,4 @@
+// client/src/pages/home.tsx
 import * as React from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +24,27 @@ import { useAuth } from "@/hooks/useAuth";
 import { useConfetti } from "@/hooks/use-confetti";
 import { AnnouncementBanner } from "@/components/announcement-banner";
 import { nf } from "@/lib/number";
+
+const XNRT_PER_USDT = 100;
+
+function formatUsdtFromXnrt(
+  amount: string | number | null | undefined
+): string {
+  const numeric =
+    typeof amount === "number"
+      ? amount
+      : amount
+      ? parseFloat(String(amount))
+      : 0;
+  const usdt = numeric / XNRT_PER_USDT;
+
+  if (!Number.isFinite(usdt)) return "0.00";
+
+  return usdt.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 function CoinGlyph({ className = "h-10 w-10" }: { className?: string }) {
   const id = React.useId();
@@ -90,6 +112,12 @@ function StatTile({
   href: string;
 }) {
   const num = nf(value);
+  const numericValue =
+    typeof value === "number" ? value : parseFloat(String(value || "0"));
+  const isXnrtStat = label === "Total Earned";
+  const usdt = isXnrtStat
+    ? formatUsdtFromXnrt(Number.isFinite(numericValue) ? numericValue : 0)
+    : null;
 
   const body = (
     <Card
@@ -109,6 +137,11 @@ function StatTile({
           >
             {num}
           </p>
+          {isXnrtStat && (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              ≈ ${usdt} USDT
+            </p>
+          )}
         </div>
         <div
           className={`grid h-11 w-11 place-items-center rounded-full ${colorClass} transition-transform duration-300 group-hover:scale-110 group-hover:rotate-[2deg]`}
@@ -236,7 +269,10 @@ export default function Home() {
   const streak = user?.streak ?? 0;
   const xnrtBalance = balance?.xnrtBalance || "0";
   const displayName =
-    user?.username || (user as any)?.name || user?.email?.split("@")?.[0] || "User";
+    user?.username ||
+    (user as any)?.name ||
+    user?.email?.split("@")?.[0] ||
+    "User";
 
   const pct = Math.max(0, Math.min(100, (xp % 1000) / 10));
 
@@ -252,9 +288,14 @@ export default function Home() {
             <span>NextGen Earning Dashboard</span>
           </div>
           <h1 className="font-serif text-3xl font-bold">
-            Welcome, <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">{displayName}</span>
+            Welcome,{" "}
+            <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+              {displayName}
+            </span>
           </h1>
-          <p className="text-sm text-muted-foreground">Beyond a coin. It&apos;s hope.</p>
+          <p className="text-sm text-muted-foreground">
+            Beyond a coin. It&apos;s hope.
+          </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <Badge
@@ -312,7 +353,13 @@ export default function Home() {
                     </span>
                   </div>
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    On-chain equivalent & in-game rewards
+                    On-chain equivalent &amp; in-game rewards
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    ≈ ${formatUsdtFromXnrt(xnrtBalance)} USDT &nbsp;
+                    <span className="opacity-70">
+                      (1 USDT = {XNRT_PER_USDT.toLocaleString()} XNRT)
+                    </span>
                   </span>
                 </div>
               </div>
@@ -354,8 +401,13 @@ export default function Home() {
                   {nf(xp)}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {nf(Math.max(0, (Math.floor(xp / 1000) + 1) * 1000 - xp))} XP
-                  &nbsp;to Lv {Math.floor(xp / 1000) + 2}
+                  {nf(
+                    Math.max(
+                      0,
+                      (Math.floor(xp / 1000) + 1) * 1000 - xp
+                    )
+                  )}{" "}
+                  XP&nbsp;to Lv {Math.floor(xp / 1000) + 2}
                 </div>
               </div>
             </div>

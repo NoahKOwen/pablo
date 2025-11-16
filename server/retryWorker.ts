@@ -149,13 +149,19 @@ if (notification.metadata) {
 }
 
 export function startRetryWorker(): void {
+  // yahan env check
+  if (process.env.ENABLE_RETRY_WORKER !== 'true') {
+    console.log('[RetryWorker] disabled (set ENABLE_RETRY_WORKER=true to enable)');
+    return;
+  }
+
   if (retryWorkerInterval) {
     console.log('Retry worker is already running');
     return;
   }
 
   console.log(`Starting push notification retry worker (runs every ${RETRY_INTERVAL_MS / 1000 / 60} minutes)`);
-  
+
   processRetryQueue().catch(err => {
     console.error('Error in initial retry queue process:', err);
   });

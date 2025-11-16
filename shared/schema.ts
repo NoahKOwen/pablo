@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
+import { TRUST_LOAN_CONFIG } from "./trust-loan";
 import { z } from "zod";
 
 // JWT Session table - for authentication
@@ -42,7 +43,7 @@ export const users = pgTable("User", {
   emailVerificationExpires: timestamp("emailVerificationExpires"),
   isAdmin: boolean("isAdmin").default(false).notNull(),
   xp: integer("xp").default(0).notNull(),
-  level: integer("level").default(1).notNull(),
+  level: integer("level").default(1.0).notNull(),
   streak: integer("streak").default(0).notNull(),
   lastCheckIn: timestamp("lastCheckIn"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -76,6 +77,16 @@ export const stakes = pgTable("Stake", {
   lastProfitDate: timestamp("lastProfitDate"),
   status: varchar("status").default("active").notNull(), // active, completed, withdrawn
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+
+  // ---- Trust Loan flags / params ----
+  isLoan: boolean("isLoan").notNull().default(false),
+  loanProgram: varchar("loanProgram"),
+  unlockMet: boolean("unlockMet").notNull().default(false),
+  requiredReferrals: integer("requiredReferrals").notNull().default(10),
+  requiredInvestingReferrals: integer("requiredInvestingReferrals").notNull().default(3),
+  minInvestUsdtPerReferral: decimal("minInvestUsdtPerReferral", { precision: 38, scale: 18 })
+    .notNull()
+    .default("50"),
 }, (table) => [
   index("stakes_userId_idx").on(table.userId),
   index("stakes_status_idx").on(table.status),
@@ -194,6 +205,10 @@ export const userAchievements = pgTable("UserAchievement", {
   userId: varchar("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   achievementId: varchar("achievementId").notNull().references(() => achievements.id, { onDelete: "cascade" }),
   unlockedAt: timestamp("unlockedAt").defaultNow().notNull(),
+
+  // ✅ match Prisma model
+  claimed: boolean("claimed").default(false).notNull(),
+  claimedAt: timestamp("claimedAt"),
 }, (table) => [
   index("user_achievements_userId_idx").on(table.userId),
   index("user_achievements_achievementId_idx").on(table.achievementId),
@@ -391,7 +406,16 @@ export type Balance = typeof balances.$inferSelect;
 export type InsertBalance = typeof balances.$inferInsert;
 
 export type Stake = typeof stakes.$inferSelect;
-export const insertStakeSchema = createInsertSchema(stakes).omit({ id: true, createdAt: true });
+export const insertStakeSchema = createInsertSchema(stakes)
+  .omit({ id: true, createdAt: true })
+  .partial({
+    isLoan: true,
+    loanProgram: true,
+    unlockMet: true,
+    requiredReferrals: true,
+    requiredInvestingReferrals: true,
+    minInvestUsdtPerReferral: true,
+  });
 export type InsertStake = z.infer<typeof insertStakeSchema>;
 
 export type MiningSession = typeof miningSessions.$inferSelect;
@@ -414,7 +438,7 @@ export type InsertUserTask = typeof userTasks.$inferInsert;
 export type Achievement = typeof achievements.$inferSelect;
 export type InsertAchievement = typeof achievements.$inferInsert;
 
-export type UserAchievement = typeof userAchievements.$inferSelect;
+export type UserAchievement = typeof userAchievements.$inferSelect;  // ✅
 export type InsertUserAchievement = typeof userAchievements.$inferInsert;
 
 export type Activity = typeof activities.$inferSelect;
@@ -465,6 +489,14 @@ export const STAKING_TIERS = {
     maxAmount: 10000000,
     dailyRate: 2.0,
     apy: 730,
+  },
+  [TRUST_LOAN_CONFIG.programKey]: {
+    name: "Trust Loan (45 Days)",
+    duration: TRUST_LOAN_CONFIG.durationDays,
+    minAmount: TRUST_LOAN_CONFIG.amountXnrt,
+    maxAmount: TRUST_LOAN_CONFIG.amountXnrt,
+    dailyRate: 1.5, // zaroorat ho to change
+    apy: 0,
   },
 } as const;
 

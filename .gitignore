@@ -54,3 +54,4 @@ Thumbs.db
 sw.js
 workbox-*.js
 *.map
+client/dev-dist/

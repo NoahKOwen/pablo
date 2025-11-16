@@ -1,5 +1,11 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,7 +44,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Pencil, Trash2, Search, Award } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Award, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useState } from "react";
@@ -61,7 +67,8 @@ export default function AchievementsTab() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedAchievement, setSelectedAchievement] = useState<Achievement | null>(null);
+  const [selectedAchievement, setSelectedAchievement] =
+    useState<Achievement | null>(null);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -91,25 +98,45 @@ export default function AchievementsTab() {
         requirement: "",
         xpReward: "",
       });
-      toast({ title: "Success", description: "Achievement created successfully" });
+      toast({
+        title: "Success",
+        description: "Achievement created successfully",
+      });
     },
     onError: () => {
-      toast({ title: "Error", description: "Failed to create achievement", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: "Failed to create achievement",
+        variant: "destructive",
+      });
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: typeof formData;
+    }) => {
       return await apiRequest("PUT", `/api/admin/achievements/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/achievements"] });
       setEditDialogOpen(false);
       setSelectedAchievement(null);
-      toast({ title: "Success", description: "Achievement updated successfully" });
+      toast({
+        title: "Success",
+        description: "Achievement updated successfully",
+      });
     },
     onError: () => {
-      toast({ title: "Error", description: "Failed to update achievement", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: "Failed to update achievement",
+        variant: "destructive",
+      });
     },
   });
 
@@ -121,18 +148,55 @@ export default function AchievementsTab() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/achievements"] });
       setDeleteDialogOpen(false);
       setSelectedAchievement(null);
-      toast({ title: "Success", description: "Achievement deleted successfully" });
+      toast({
+        title: "Success",
+        description: "Achievement deleted successfully",
+      });
     },
     onError: () => {
-      toast({ title: "Error", description: "Failed to delete achievement", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: "Failed to delete achievement",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // ✅ NEW: Seed defaults mutation
+  const seedDefaultsMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest(
+        "POST",
+        "/api/admin/achievements/seed-defaults",
+        {}
+      );
+    },
+    onSuccess: (res: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/achievements"] });
+      toast({
+        title: "Defaults added",
+        description:
+          res?.message ||
+          "Default achievements have been created/updated successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to add default achievements",
+        variant: "destructive",
+      });
     },
   });
 
   const filteredAchievements = achievements?.filter((achievement) => {
     const matchesSearch =
       achievement.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      achievement.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === "all" || achievement.category === categoryFilter;
+      achievement.description
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase());
+    const matchesCategory =
+      categoryFilter === "all" || achievement.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
 
@@ -156,11 +220,16 @@ export default function AchievementsTab() {
 
   const getCategoryBadgeColor = (category: string) => {
     switch (category) {
-      case "earnings": return "bg-green-500/20 text-green-500";
-      case "referrals": return "bg-blue-500/20 text-blue-500";
-      case "streaks": return "bg-purple-500/20 text-purple-500";
-      case "mining": return "bg-amber-500/20 text-amber-500";
-      default: return "bg-gray-500/20 text-gray-500";
+      case "earnings":
+        return "bg-green-500/20 text-green-500";
+      case "referrals":
+        return "bg-blue-500/20 text-blue-500";
+      case "streaks":
+        return "bg-purple-500/20 text-purple-500";
+      case "mining":
+        return "bg-amber-500/20 text-amber-500";
+      default:
+        return "bg-gray-500/20 text-gray-500";
     }
   };
 
@@ -179,8 +248,14 @@ export default function AchievementsTab() {
               data-testid="input-search-achievements"
             />
           </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[150px]" data-testid="select-category-filter">
+          <Select
+            value={categoryFilter}
+            onValueChange={setCategoryFilter}
+          >
+            <SelectTrigger
+              className="w-[150px]"
+              data-testid="select-category-filter"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -192,10 +267,25 @@ export default function AchievementsTab() {
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-create-achievement">
-          <Plus className="h-4 w-4 mr-2" />
-          Create Achievement
-        </Button>
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => seedDefaultsMutation.mutate()}
+            disabled={seedDefaultsMutation.isPending}
+            data-testid="button-seed-default-achievements"
+          >
+            <Wand2 className="h-4 w-4 mr-2" />
+            Quick Add Defaults
+          </Button>
+          <Button
+            onClick={() => setCreateDialogOpen(true)}
+            data-testid="button-create-achievement"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Create Achievement
+          </Button>
+        </div>
       </div>
 
       {/* Achievements Table */}
@@ -205,12 +295,14 @@ export default function AchievementsTab() {
             <Award className="h-5 w-5" />
             Achievements Management
           </CardTitle>
-          <CardDescription>Manage platform achievements and milestones</CardDescription>
+          <CardDescription>
+            Manage platform achievements and milestones
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
           ) : filteredAchievements && filteredAchievements.length > 0 ? (
             <Table>
@@ -226,25 +318,40 @@ export default function AchievementsTab() {
               </TableHeader>
               <TableBody>
                 {filteredAchievements.map((achievement) => (
-                  <TableRow key={achievement.id} data-testid={`row-achievement-${achievement.id}`}>
+                  <TableRow
+                    key={achievement.id}
+                    data-testid={`row-achievement-${achievement.id}`}
+                  >
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <span className="text-2xl">{achievement.icon}</span>
                         <div>
-                          <div className="font-medium">{achievement.title}</div>
-                          <div className="text-xs text-muted-foreground line-clamp-1">{achievement.description}</div>
+                          <div className="font-medium">
+                            {achievement.title}
+                          </div>
+                          <div className="text-xs text-muted-foreground line-clamp-1">
+                            {achievement.description}
+                          </div>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge className={getCategoryBadgeColor(achievement.category)}>
+                      <Badge
+                        className={getCategoryBadgeColor(
+                          achievement.category
+                        )}
+                      >
                         {achievement.category}
                       </Badge>
                     </TableCell>
-                    <TableCell>{achievement.requirement.toLocaleString()}</TableCell>
+                    <TableCell>
+                      {achievement.requirement.toLocaleString()}
+                    </TableCell>
                     <TableCell>{achievement.xpReward} XP</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{achievement.unlockCount} users</Badge>
+                      <Badge variant="secondary">
+                        {achievement.unlockCount} users
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
@@ -271,23 +378,32 @@ export default function AchievementsTab() {
               </TableBody>
             </Table>
           ) : (
-            <p className="text-center py-8 text-muted-foreground">No achievements found</p>
+            <p className="text-center py-8 text-muted-foreground">
+              No achievements found
+            </p>
           )}
         </CardContent>
       </Card>
 
       {/* Create/Edit Dialog */}
-      <Dialog open={createDialogOpen || editDialogOpen} onOpenChange={(open) => {
-        if (!open) {
-          setCreateDialogOpen(false);
-          setEditDialogOpen(false);
-        }
-      }}>
+      <Dialog
+        open={createDialogOpen || editDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreateDialogOpen(false);
+            setEditDialogOpen(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editDialogOpen ? "Edit Achievement" : "Create New Achievement"}</DialogTitle>
+            <DialogTitle>
+              {editDialogOpen ? "Edit Achievement" : "Create New Achievement"}
+            </DialogTitle>
             <DialogDescription>
-              {editDialogOpen ? "Update achievement details" : "Add a new achievement to the platform"}
+              {editDialogOpen
+                ? "Update achievement details"
+                : "Add a new achievement to the platform"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -296,7 +412,9 @@ export default function AchievementsTab() {
               <Input
                 id="title"
                 value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, title: e.target.value })
+                }
                 placeholder="First Earnings"
                 data-testid="input-title"
               />
@@ -306,7 +424,9 @@ export default function AchievementsTab() {
               <Textarea
                 id="description"
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, description: e.target.value })
+                }
                 placeholder="Earn your first 1000 XNRT"
                 rows={3}
                 data-testid="input-description"
@@ -318,7 +438,9 @@ export default function AchievementsTab() {
                 <Input
                   id="icon"
                   value={formData.icon}
-                  onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, icon: e.target.value })
+                  }
                   placeholder="🏆"
                   maxLength={2}
                   data-testid="input-icon"
@@ -326,7 +448,12 @@ export default function AchievementsTab() {
               </div>
               <div>
                 <Label htmlFor="category">Category</Label>
-                <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, category: value })
+                  }
+                >
                   <SelectTrigger data-testid="select-category">
                     <SelectValue />
                   </SelectTrigger>
@@ -346,15 +473,22 @@ export default function AchievementsTab() {
                   id="requirement"
                   type="number"
                   value={formData.requirement}
-                  onChange={(e) => setFormData({ ...formData, requirement: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      requirement: e.target.value,
+                    })
+                  }
                   placeholder="1000"
                   data-testid="input-requirement"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   {formData.category === "earnings" && "Total XNRT earned"}
                   {formData.category === "referrals" && "Number of referrals"}
-                  {formData.category === "streaks" && "Login streak days"}
-                  {formData.category === "mining" && "Mining sessions completed"}
+                  {formData.category === "streaks" &&
+                    "Login streak days (consecutive)"}
+                  {formData.category === "mining" &&
+                    "Mining sessions completed"}
                 </p>
               </div>
               <div>
@@ -363,7 +497,9 @@ export default function AchievementsTab() {
                   id="xpReward"
                   type="number"
                   value={formData.xpReward}
-                  onChange={(e) => setFormData({ ...formData, xpReward: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, xpReward: e.target.value })
+                  }
                   placeholder="500"
                   data-testid="input-xp-reward"
                 />
@@ -371,21 +507,32 @@ export default function AchievementsTab() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setCreateDialogOpen(false);
-              setEditDialogOpen(false);
-            }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateDialogOpen(false);
+                setEditDialogOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button
               onClick={() => {
                 if (editDialogOpen && selectedAchievement) {
-                  updateMutation.mutate({ id: selectedAchievement.id, data: formData });
+                  updateMutation.mutate({
+                    id: selectedAchievement.id,
+                    data: formData,
+                  });
                 } else {
                   createMutation.mutate(formData);
                 }
               }}
-              disabled={createMutation.isPending || updateMutation.isPending || !formData.title || !formData.description}
+              disabled={
+                createMutation.isPending ||
+                updateMutation.isPending ||
+                !formData.title ||
+                !formData.description
+              }
               data-testid="button-submit"
             >
               {editDialogOpen ? "Update Achievement" : "Create Achievement"}
@@ -401,13 +548,17 @@ export default function AchievementsTab() {
             <AlertDialogTitle>Delete Achievement</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete "{selectedAchievement?.title}"?
-              This will also remove all user unlocks for this achievement. This action cannot be undone.
+              This will also remove all user unlocks for this achievement. This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => selectedAchievement && deleteMutation.mutate(selectedAchievement.id)}
+              onClick={() =>
+                selectedAchievement &&
+                deleteMutation.mutate(selectedAchievement.id)
+              }
               className="bg-destructive hover:bg-destructive/90"
               data-testid="button-confirm-delete"
             >
