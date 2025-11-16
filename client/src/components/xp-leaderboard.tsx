@@ -1,3 +1,5 @@
+// client/src/components/xp-leaderboard.tsx
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,17 +27,30 @@ interface LeaderboardResponse {
 export function XPLeaderboard() {
   const { user } = useAuth();
   const isAdmin = user?.isAdmin || false;
-  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'all-time'>('all-time');
-  const [category, setCategory] = useState<'overall' | 'mining' | 'staking' | 'referrals'>('overall');
 
-  const { data, isLoading } = useQuery<LeaderboardResponse>({
-    queryKey: ['/api/leaderboard/xp', period, category],
+  const [period, setPeriod] = useState<"daily" | "weekly" | "monthly" | "all-time">(
+    "all-time"
+  );
+  const [category, setCategory] = useState<"overall" | "mining" | "staking" | "referrals">(
+    "overall"
+  );
+
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+  } = useQuery<LeaderboardResponse, Error>({
+    queryKey: ["/api/leaderboard/xp", period, category],
     queryFn: async () => {
       const res = await fetch(`/api/leaderboard/xp?period=${period}&category=${category}`);
-      if (!res.ok) throw new Error('Failed to fetch XP leaderboard');
-      return res.json();
+      if (!res.ok) throw new Error("Failed to fetch XP leaderboard");
+      return (await res.json()) as LeaderboardResponse;
     },
   });
+
+  const leaderboard = data?.leaderboard ?? [];
+  const userPosition = data?.userPosition ?? null;
 
   const getRankIcon = (rank: number) => {
     if (rank === 1) return <Trophy className="h-5 w-5 text-yellow-500" />;
@@ -46,10 +61,10 @@ export function XPLeaderboard() {
 
   const getCategoryLabel = (cat: string) => {
     const labels: Record<string, string> = {
-      overall: 'Overall',
-      mining: 'Mining',
-      staking: 'Staking',
-      referrals: 'Referrals',
+      overall: "Overall",
+      mining: "Mining",
+      staking: "Staking",
+      referrals: "Referrals",
     };
     return labels[cat] || cat;
   };
@@ -59,28 +74,28 @@ export function XPLeaderboard() {
       <CardHeader>
         <div className="space-y-4">
           <CardTitle>XP Leaderboard</CardTitle>
-          
+
           {/* Period Selector */}
           <div className="flex gap-1">
-            {(['daily', 'weekly', 'monthly', 'all-time'] as const).map((p) => (
+            {(["daily", "weekly", "monthly", "all-time"] as const).map((p) => (
               <Button
                 key={p}
-                variant={period === p ? 'default' : 'ghost'}
+                variant={period === p ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setPeriod(p)}
                 data-testid={`button-period-${p}`}
               >
-                {p.charAt(0).toUpperCase() + p.slice(1).replace('-', ' ')}
+                {p.charAt(0).toUpperCase() + p.slice(1).replace("-", " ")}
               </Button>
             ))}
           </div>
 
           {/* Category Selector */}
           <div className="flex gap-1">
-            {(['overall', 'mining', 'staking', 'referrals'] as const).map((cat) => (
+            {(["overall", "mining", "staking", "referrals"] as const).map((cat) => (
               <Button
                 key={cat}
-                variant={category === cat ? 'default' : 'outline'}
+                variant={category === cat ? "default" : "outline"}
                 size="sm"
                 onClick={() => setCategory(cat)}
                 data-testid={`button-category-${cat}`}
@@ -91,6 +106,7 @@ export function XPLeaderboard() {
           </div>
         </div>
       </CardHeader>
+
       <CardContent className="space-y-4">
         {isLoading ? (
           <div className="space-y-3">
@@ -98,14 +114,23 @@ export function XPLeaderboard() {
               <Skeleton key={i} className="h-16 w-full" />
             ))}
           </div>
-        ) : data && data.leaderboard.length > 0 ? (
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <Star className="h-12 w-12 text-destructive mb-4" />
+            <p className="text-destructive text-sm" data-testid="text-leaderboard-error">
+              {(error && error.message) || "Failed to load leaderboard"}
+            </p>
+          </div>
+        ) : leaderboard.length > 0 ? (
           <>
             <div className="space-y-2">
-              {data.leaderboard.slice(0, 10).map((entry, index) => (
+              {leaderboard.slice(0, 10).map((entry) => (
                 <div
-                  key={`rank-${index}`}
+                  key={`rank-${entry.rank}`}
                   className={`flex items-center gap-4 p-3 rounded-lg border ${
-                    entry.rank <= 3 ? 'bg-gradient-to-r from-primary/5 to-transparent border-primary/20' : 'bg-card border-border'
+                    entry.rank <= 3
+                      ? "bg-gradient-to-r from-primary/5 to-transparent border-primary/20"
+                      : "bg-card border-border"
                   }`}
                   data-testid={`leaderboard-entry-${entry.rank}`}
                 >
@@ -113,14 +138,17 @@ export function XPLeaderboard() {
                     {getRankIcon(entry.rank)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate" data-testid={`text-displayname-${entry.rank}`}>
+                    <p
+                      className="font-semibold truncate"
+                      data-testid={`text-displayname-${entry.rank}`}
+                    >
                       {entry.displayName}
                     </p>
                     <div className="flex gap-2 text-xs text-muted-foreground">
                       <span data-testid={`text-xp-${entry.rank}`}>
-                        {category === 'overall' ? entry.xp : entry.categoryXp} XP
+                        {category === "overall" ? entry.xp : entry.categoryXp} XP
                       </span>
-                      {category !== 'overall' && (
+                      {category !== "overall" && (
                         <>
                           <span>•</span>
                           <span>{entry.xp} Total XP</span>
@@ -129,7 +157,12 @@ export function XPLeaderboard() {
                       {isAdmin && entry.userId && (
                         <>
                           <span>•</span>
-                          <span className="font-mono text-[10px]" title={entry.email}>ID: {entry.userId.substring(0, 8)}...</span>
+                          <span
+                            className="font-mono text-[10px]"
+                            title={entry.email}
+                          >
+                            ID: {entry.userId.substring(0, 8)}...
+                          </span>
                         </>
                       )}
                     </div>
@@ -143,29 +176,47 @@ export function XPLeaderboard() {
               ))}
             </div>
 
-            {data.userPosition && data.userPosition.rank > 10 && (
+            {userPosition && userPosition.rank > 10 && (
               <div className="pt-4 border-t">
                 <p className="text-sm text-muted-foreground mb-2">Your Position</p>
-                <div className="flex items-center gap-4 p-3 rounded-lg border bg-primary/5 border-primary/20" data-testid="leaderboard-user-position">
+                <div
+                  className="flex items-center gap-4 p-3 rounded-lg border bg-primary/5 border-primary/20"
+                  data-testid="leaderboard-user-position"
+                >
                   <div className="w-8 flex items-center justify-center">
-                    <span className="text-sm font-bold text-primary">#{data.userPosition.rank}</span>
+                    <span className="text-sm font-bold text-primary">
+                      #{userPosition.rank}
+                    </span>
                   </div>
                   <div className="flex-1">
-                    <p className="font-semibold" data-testid="text-displayname-user">{data.userPosition.displayName}</p>
+                    <p
+                      className="font-semibold"
+                      data-testid="text-displayname-user"
+                    >
+                      {userPosition.displayName}
+                    </p>
                     <div className="flex gap-2 text-xs text-muted-foreground">
                       <span data-testid="text-user-xp">
-                        {category === 'overall' ? data.userPosition.xp : data.userPosition.categoryXp} XP
+                        {category === "overall"
+                          ? userPosition.xp
+                          : userPosition.categoryXp}{" "}
+                        XP
                       </span>
-                      {category !== 'overall' && (
+                      {category !== "overall" && (
                         <>
                           <span>•</span>
-                          <span>{data.userPosition.xp} Total XP</span>
+                          <span>{userPosition.xp} Total XP</span>
                         </>
                       )}
-                      {isAdmin && data.userPosition.userId && (
+                      {isAdmin && userPosition.userId && (
                         <>
                           <span>•</span>
-                          <span className="font-mono text-[10px]" title={data.userPosition.email}>ID: {data.userPosition.userId.substring(0, 8)}...</span>
+                          <span
+                            className="font-mono text-[10px]"
+                            title={userPosition.email}
+                          >
+                            ID: {userPosition.userId.substring(0, 8)}...
+                          </span>
                         </>
                       )}
                     </div>

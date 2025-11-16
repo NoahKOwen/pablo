@@ -1,8 +1,7 @@
-// Prisma-based storage implementation
 import { PrismaClient, Prisma } from "@prisma/client";
 import crypto from "crypto";
 import { nanoid } from "nanoid";
-import { 
+import {
   type User,
   type UpsertUser,
   type Balance,
@@ -38,7 +37,7 @@ function generateReferralCode(): string {
 }
 
 export function generateAnonymizedHandle(userId: string): string {
-  const hash = crypto.createHash('sha256').update(userId).digest('hex');
+  const hash = crypto.createHash("sha256").update(userId).digest("hex");
   return `Player-${hash.substring(0, 4).toUpperCase()}`;
 }
 
@@ -80,6 +79,13 @@ function convertPrismaStake(stake: any): Stake {
     dailyRate: decimalToString(stake.dailyRate),
     totalProfit: decimalToString(stake.totalProfit),
     lastProfitDate: stake.lastProfitDate || undefined,
+    // Trust Loan / loan-related fields
+    isLoan: stake.isLoan,
+    loanProgram: stake.loanProgram || undefined,
+    unlockMet: stake.unlockMet,
+    requiredReferrals: stake.requiredReferrals,
+    requiredInvestingReferrals: stake.requiredInvestingReferrals,
+    minInvestUsdtPerReferral: decimalToString(stake.minInvestUsdtPerReferral),
   } as Stake;
 }
 
@@ -94,20 +100,26 @@ function convertPrismaTransaction(transaction: any): Transaction {
   return {
     ...transaction,
     amount: decimalToString(transaction.amount),
-    usdtAmount: transaction.usdtAmount ? decimalToString(transaction.usdtAmount) : undefined,
+    usdtAmount: transaction.usdtAmount
+      ? decimalToString(transaction.usdtAmount)
+      : undefined,
     source: transaction.source || undefined,
     walletAddress: transaction.walletAddress || undefined,
     transactionHash: transaction.transactionHash || undefined,
     proofImageUrl: transaction.proofImageUrl || undefined,
     adminNotes: transaction.adminNotes || undefined,
     fee: transaction.fee ? decimalToString(transaction.fee) : undefined,
-    netAmount: transaction.netAmount ? decimalToString(transaction.netAmount) : undefined,
+    netAmount: transaction.netAmount
+      ? decimalToString(transaction.netAmount)
+      : undefined,
     approvedBy: transaction.approvedBy || undefined,
     approvedAt: transaction.approvedAt || undefined,
-    user: transaction.user ? {
-      email: transaction.user.email,
-      username: transaction.user.username,
-    } : undefined,
+    user: transaction.user
+      ? {
+          email: transaction.user.email,
+          username: transaction.user.username,
+        }
+      : undefined,
   } as Transaction;
 }
 
@@ -153,12 +165,17 @@ export interface IStorage {
   upsertUser(user: UpsertUser, referralCode?: string): Promise<User>;
   updateUser(userId: string, updates: Partial<User>): Promise<User>;
   getAllUsers(): Promise<User[]>;
-  
+
   // Balance operations
   getBalance(userId: string): Promise<Balance | undefined>;
   createBalance(balance: InsertBalance): Promise<Balance>;
   updateBalance(userId: string, updates: Partial<Balance>): Promise<Balance>;
-  
+  adjustStakingBalance(data: {
+    userId: string;
+    amount: string;
+    operation?: "add" | "subtract";
+  }): Promise<Balance>;
+
   // Staking operations
   getStakes(userId: string): Promise<Stake[]>;
   getStakeById(id: string): Promise<Stake | undefined>;
@@ -167,42 +184,58 @@ export interface IStorage {
   atomicWithdrawStake(id: string, totalProfit: string): Promise<Stake | null>;
   getAllActiveStakes(): Promise<Stake[]>;
   processStakingRewards(): Promise<void>;
-  
+
   // Mining operations
   getCurrentMiningSession(userId: string): Promise<MiningSession | undefined>;
   getMiningHistory(userId: string): Promise<MiningSession[]>;
   createMiningSession(session: InsertMiningSession): Promise<MiningSession>;
-  updateMiningSession(id: string, updates: Partial<MiningSession>): Promise<MiningSession>;
+  updateMiningSession(
+    id: string,
+    updates: Partial<MiningSession>
+  ): Promise<MiningSession>;
   processMiningRewards(): Promise<void>;
-  
+
   // Referral operations
   getReferralsByReferrer(referrerId: string): Promise<Referral[]>;
   createReferral(referral: InsertReferral): Promise<Referral>;
   updateReferral(id: string, updates: Partial<Referral>): Promise<Referral>;
-  
+  distributeReferralCommissions(userId: string, amount: number): Promise<void>;
+  getReferrerChain(userId: string, maxLevels: number): Promise<User[]>;
+
   // Transaction operations
-  getTransactionsByUser(userId: string, type?: string): Promise<Transaction[]>;
+  getTransactionsByUser(
+    userId: string,
+    type?: string
+  ): Promise<Transaction[]>;
   getTransactionById(id: string): Promise<Transaction | undefined>;
   createTransaction(transaction: InsertTransaction): Promise<Transaction>;
   updateTransaction(id: string, updates: Partial<Transaction>): Promise<Transaction>;
   getAllTransactions(type?: string): Promise<Transaction[]>;
   getPendingTransactions(type: string): Promise<Transaction[]>;
-  
+
   // Task operations
   getAllTasks(): Promise<Task[]>;
   getUserTasks(userId: string): Promise<UserTask[]>;
   createUserTask(userTask: InsertUserTask): Promise<UserTask>;
   updateUserTask(id: string, updates: Partial<UserTask>): Promise<UserTask>;
-  
+
   // Achievement operations
   getAllAchievements(): Promise<Achievement[]>;
   getUserAchievements(userId: string): Promise<UserAchievement[]>;
-  createUserAchievement(userAchievement: InsertUserAchievement): Promise<UserAchievement>;
-  
+  createUserAchievement(
+    userAchievement: InsertUserAchievement
+  ): Promise<UserAchievement>;
+  checkAndUnlockAchievements(userId: string): Promise<void>;
+
+  // Achievements with unlock count (for user-facing list)
+  getAchievementsWithUnlockCount(): Promise<
+    (Achievement & { unlockCount: number })[]
+  >;
+
   // Activity operations
   createActivity(activity: InsertActivity): Promise<Activity>;
   getActivities(userId: string, limit?: number): Promise<Activity[]>;
-  
+
   // Notification operations
   createNotification(notification: InsertNotification): Promise<Notification>;
   getNotifications(userId: string, limit?: number): Promise<Notification[]>;
@@ -210,24 +243,37 @@ export interface IStorage {
   markNotificationAsRead(id: string): Promise<Notification>;
   markAllNotificationsAsRead(userId: string): Promise<void>;
   getNotificationsPendingPush(limit: number): Promise<Notification[]>;
-  updateNotificationDelivery(id: string, updates: {
-    deliveredAt?: Date;
-    deliveryAttempts?: number;
-    lastAttemptAt?: Date;
-    pendingPush?: boolean;
-    pushError?: string;
-  }): Promise<Notification>;
-  
+  updateNotificationDelivery(
+    id: string,
+    updates: {
+      deliveredAt?: Date;
+      deliveryAttempts?: number;
+      lastAttemptAt?: Date;
+      pendingPush?: boolean;
+      pushError?: string;
+    }
+  ): Promise<Notification>;
+
   // Push Subscription operations
-  getPushSubscription(userId: string, endpoint: string): Promise<PushSubscription | null>;
-  createPushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
+  getPushSubscription(
+    userId: string,
+    endpoint: string
+  ): Promise<PushSubscription | null>;
+  createPushSubscription(
+    data: InsertPushSubscription
+  ): Promise<PushSubscription>;
   deletePushSubscription(userId: string, endpoint: string): Promise<void>;
   getUserPushSubscriptions(userId: string): Promise<PushSubscription[]>;
   disablePushSubscription(endpoint: string): Promise<void>;
-  
+
   // XP Leaderboard operations
-  getXPLeaderboard(currentUserId: string, period: string, category: string, isAdmin: boolean): Promise<any>;
-  
+  getXPLeaderboard(
+    currentUserId: string,
+    period: string,
+    category: string,
+    isAdmin: boolean
+  ): Promise<any>;
+
   // Raw query support
   raw(query: string, params?: any[]): Promise<any[]>;
 }
@@ -243,16 +289,19 @@ export class DatabaseStorage implements IStorage {
 
   async upsertUser(userData: UpsertUser, refCode?: string): Promise<User> {
     const existingUser = await this.getUser(userData.id!);
-    
+
     if (existingUser) {
       const updateData: any = {};
-      if (userData.email !== undefined && userData.email !== null) updateData.email = userData.email;
-      if (userData.username !== undefined && userData.username !== null) updateData.username = userData.username;
+      if (userData.email !== undefined && userData.email !== null)
+        updateData.email = userData.email;
+      if (userData.username !== undefined && userData.username !== null)
+        updateData.username = userData.username;
       if (userData.isAdmin !== undefined) updateData.isAdmin = userData.isAdmin;
       if (userData.xp !== undefined) updateData.xp = userData.xp;
       if (userData.level !== undefined) updateData.level = userData.level;
       if (userData.streak !== undefined) updateData.streak = userData.streak;
-      if (userData.lastCheckIn !== undefined) updateData.lastCheckIn = userData.lastCheckIn;
+      if (userData.lastCheckIn !== undefined)
+        updateData.lastCheckIn = userData.lastCheckIn;
       updateData.updatedAt = new Date();
 
       const user = await prisma.user.update({
@@ -268,7 +317,10 @@ export class DatabaseStorage implements IStorage {
       data: {
         id: userData.id,
         email: userData.email || "",
-        username: userData.username || userData.email?.split('@')[0] || `user${Date.now()}`,
+        username:
+          userData.username ||
+          userData.email?.split("@")[0] ||
+          `user${Date.now()}`,
         passwordHash: (userData as any).passwordHash || "",
         referralCode,
         referredBy: refCode || null,
@@ -308,10 +360,13 @@ export class DatabaseStorage implements IStorage {
           userId: referrer.id,
           type: "new_referral",
           title: "🎉 New Referral!",
-          message: `${user.username || 'A new user'} just joined using your referral code!`,
-          metadata: JSON.stringify({referredUserId: user.id,
-referredUsername: user.username,
-}),
+          message: `${
+            user.username || "A new user"
+          } just joined using your referral code!`,
+          metadata: JSON.stringify({
+            referredUserId: user.id,
+            referredUsername: user.username,
+          }) as any,
         });
 
         // Check and unlock referral achievements for the referrer
@@ -324,14 +379,15 @@ referredUsername: user.username,
 
   async updateUser(userId: string, updates: Partial<User>): Promise<User> {
     const updateData: any = {};
-    
+
     if (updates.email !== undefined) updateData.email = updates.email;
     if (updates.username !== undefined) updateData.username = updates.username;
     if (updates.isAdmin !== undefined) updateData.isAdmin = updates.isAdmin;
     if (updates.xp !== undefined) updateData.xp = updates.xp;
     if (updates.level !== undefined) updateData.level = updates.level;
     if (updates.streak !== undefined) updateData.streak = updates.streak;
-    if (updates.lastCheckIn !== undefined) updateData.lastCheckIn = updates.lastCheckIn;
+    if (updates.lastCheckIn !== undefined)
+      updateData.lastCheckIn = updates.lastCheckIn;
     updateData.updatedAt = new Date();
 
     const user = await prisma.user.update({
@@ -368,14 +424,22 @@ referredUsername: user.username,
     return convertPrismaBalance(newBalance);
   }
 
-  async updateBalance(userId: string, updates: Partial<Balance>): Promise<Balance> {
+  async updateBalance(
+    userId: string,
+    updates: Partial<Balance>
+  ): Promise<Balance> {
     const data: any = { updatedAt: new Date() };
-    
-    if (updates.xnrtBalance !== undefined) data.xnrtBalance = new Prisma.Decimal(updates.xnrtBalance);
-    if (updates.stakingBalance !== undefined) data.stakingBalance = new Prisma.Decimal(updates.stakingBalance);
-    if (updates.miningBalance !== undefined) data.miningBalance = new Prisma.Decimal(updates.miningBalance);
-    if (updates.referralBalance !== undefined) data.referralBalance = new Prisma.Decimal(updates.referralBalance);
-    if (updates.totalEarned !== undefined) data.totalEarned = new Prisma.Decimal(updates.totalEarned);
+
+    if (updates.xnrtBalance !== undefined)
+      data.xnrtBalance = new Prisma.Decimal(updates.xnrtBalance);
+    if (updates.stakingBalance !== undefined)
+      data.stakingBalance = new Prisma.Decimal(updates.stakingBalance);
+    if (updates.miningBalance !== undefined)
+      data.miningBalance = new Prisma.Decimal(updates.miningBalance);
+    if (updates.referralBalance !== undefined)
+      data.referralBalance = new Prisma.Decimal(updates.referralBalance);
+    if (updates.totalEarned !== undefined)
+      data.totalEarned = new Prisma.Decimal(updates.totalEarned);
 
     const balance = await prisma.balance.update({
       where: { userId },
@@ -384,11 +448,32 @@ referredUsername: user.username,
     return convertPrismaBalance(balance);
   }
 
+  async adjustStakingBalance({
+    userId,
+    amount,
+    operation = "add",
+  }: {
+    userId: string;
+    amount: string;
+    operation?: "add" | "subtract";
+  }): Promise<Balance> {
+    const balance = await prisma.balance.update({
+      where: { userId },
+      data: {
+        stakingBalance: {
+          [operation === "add" ? "increment" : "decrement"]:
+            new Prisma.Decimal(amount),
+        },
+      },
+    });
+    return convertPrismaBalance(balance);
+  }
+
   // Staking operations
   async getStakes(userId: string): Promise<Stake[]> {
     const stakes = await prisma.stake.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
     return stakes.map(convertPrismaStake);
   }
@@ -413,6 +498,15 @@ referredUsername: user.username,
         totalProfit: new Prisma.Decimal(stake.totalProfit || "0"),
         lastProfitDate: stake.lastProfitDate,
         status: stake.status || "active",
+        // Trust Loan fields
+        isLoan: stake.isLoan || false,
+        loanProgram: stake.loanProgram,
+        unlockMet: stake.unlockMet || false,
+        requiredReferrals: stake.requiredReferrals,
+        requiredInvestingReferrals: stake.requiredInvestingReferrals,
+        minInvestUsdtPerReferral: stake.minInvestUsdtPerReferral
+          ? new Prisma.Decimal(stake.minInvestUsdtPerReferral)
+          : undefined,
       },
     });
     return convertPrismaStake(newStake);
@@ -420,10 +514,13 @@ referredUsername: user.username,
 
   async updateStake(id: string, updates: Partial<Stake>): Promise<Stake> {
     const data: any = {};
-    
-    if (updates.totalProfit !== undefined) data.totalProfit = new Prisma.Decimal(updates.totalProfit);
-    if (updates.lastProfitDate !== undefined) data.lastProfitDate = updates.lastProfitDate;
+
+    if (updates.totalProfit !== undefined)
+      data.totalProfit = new Prisma.Decimal(updates.totalProfit);
+    if (updates.lastProfitDate !== undefined)
+      data.lastProfitDate = updates.lastProfitDate;
     if (updates.status !== undefined) data.status = updates.status;
+    if (updates.unlockMet !== undefined) data.unlockMet = updates.unlockMet;
 
     const stake = await prisma.stake.update({
       where: { id },
@@ -432,15 +529,15 @@ referredUsername: user.username,
     return convertPrismaStake(stake);
   }
 
-  async atomicWithdrawStake(id: string, totalProfit: string): Promise<Stake | null> {
+  async atomicWithdrawStake(
+    id: string,
+    totalProfit: string
+  ): Promise<Stake | null> {
     try {
       const stake = await prisma.stake.updateMany({
         where: {
           id,
-          OR: [
-            { status: "completed" },
-            { status: "active" },
-          ],
+          OR: [{ status: "completed" }, { status: "active" }],
         },
         data: {
           status: "withdrawn",
@@ -455,7 +552,7 @@ referredUsername: user.username,
       });
 
       return updatedStake ? convertPrismaStake(updatedStake) : null;
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -475,19 +572,32 @@ referredUsername: user.username,
     for (const stake of activeStakes) {
       const lastProfitDate = new Date(stake.lastProfitDate || stake.startDate);
       const endDate = new Date(stake.endDate);
-      
-      const daysSinceLastProfit = Math.floor((now.getTime() - lastProfitDate.getTime()) / DAY_MS);
-      const daysUntilEnd = Math.floor((endDate.getTime() - lastProfitDate.getTime()) / DAY_MS);
-      
-      const creditedDays = Math.max(0, Math.min(daysSinceLastProfit, daysUntilEnd));
+
+      const daysSinceLastProfit = Math.floor(
+        (now.getTime() - lastProfitDate.getTime()) / DAY_MS
+      );
+      const daysUntilEnd = Math.floor(
+        (endDate.getTime() - lastProfitDate.getTime()) / DAY_MS
+      );
+
+      const creditedDays = Math.max(
+        0,
+        Math.min(daysSinceLastProfit, daysUntilEnd)
+      );
 
       if (creditedDays >= 1) {
-        const dailyProfit = (parseFloat(stake.amount) * parseFloat(stake.dailyRate)) / 100;
+        const dailyProfit =
+          (parseFloat(stake.amount) * parseFloat(stake.dailyRate)) / 100;
         const profitToAdd = dailyProfit * creditedDays;
         const newTotalProfit = parseFloat(stake.totalProfit) + profitToAdd;
-        
-        const calculatedLastProfitDate = new Date(lastProfitDate.getTime() + creditedDays * DAY_MS);
-        const newLastProfitDate = calculatedLastProfitDate > endDate ? endDate : calculatedLastProfitDate;
+
+        const calculatedLastProfitDate = new Date(
+          lastProfitDate.getTime() + creditedDays * DAY_MS
+        );
+        const newLastProfitDate =
+          calculatedLastProfitDate > endDate
+            ? endDate
+            : calculatedLastProfitDate;
 
         await this.updateStake(stake.id, {
           totalProfit: newTotalProfit.toString(),
@@ -497,33 +607,47 @@ referredUsername: user.username,
         const balance = await this.getBalance(stake.userId);
         if (balance) {
           await this.updateBalance(stake.userId, {
-            stakingBalance: (parseFloat(balance.stakingBalance) + profitToAdd).toString(),
-            totalEarned: (parseFloat(balance.totalEarned) + profitToAdd).toString(),
+            stakingBalance: (
+              parseFloat(balance.stakingBalance) + profitToAdd
+            ).toString(),
+            totalEarned: (
+              parseFloat(balance.totalEarned) + profitToAdd
+            ).toString(),
           });
         }
 
         await this.createActivity({
           userId: stake.userId,
           type: "staking_reward",
-          description: `Earned ${profitToAdd.toFixed(2)} XNRT from staking (${creditedDays} day${creditedDays > 1 ? 's' : ''})`,
+          description: `Earned ${profitToAdd.toFixed(
+            2
+          )} XNRT from staking (${creditedDays} day${
+            creditedDays > 1 ? "s" : ""
+          })`,
         });
 
         const { notifyUser } = await import("./notifications");
         void notifyUser(stake.userId, {
           type: "staking_reward",
           title: "💎 Staking Rewards!",
-          message: `You earned ${profitToAdd.toFixed(2)} XNRT from ${creditedDays} day${creditedDays > 1 ? 's' : ''} of staking`,
+          message: `You earned ${profitToAdd.toFixed(
+            2
+          )} XNRT from ${creditedDays} day${
+            creditedDays > 1 ? "s" : ""
+          } of staking`,
           url: "/staking",
           metadata: {
             amount: profitToAdd.toString(),
             days: creditedDays,
             stakeId: stake.id,
           },
-        }).catch(err => {
-          console.error('Error sending staking reward notification (non-blocking):', err);
+        }).catch((err) => {
+          console.error(
+            "Error sending staking reward notification (non-blocking):",
+            err
+          );
         });
 
-        // Check and unlock achievements
         await this.checkAndUnlockAchievements(stake.userId);
       }
 
@@ -535,95 +659,114 @@ referredUsername: user.username,
     }
   }
 
+  // -------------------- Mining reward processor --------------------
   async processMiningRewards(): Promise<void> {
     const activeSessions = await prisma.miningSession.findMany({
       where: { status: "active" },
     });
+
     const now = new Date();
 
     for (const session of activeSessions) {
       if (!session.endTime) continue;
+
       const endTime = new Date(session.endTime);
-      
-      if (now >= endTime) {
-        const xpReward = session.finalReward;
-        const xnrtReward = session.finalReward * 0.5;
+      if (now < endTime) continue;
 
-        await this.updateMiningSession(session.id, {
-          status: "completed",
-          endTime: now,
+      const baseReward = session.baseReward ?? 10;
+      const boostPercentage = session.boostPercentage ?? 0;
+      const finalReward =
+        session.finalReward ??
+        (baseReward + Math.floor((baseReward * boostPercentage) / 100));
+
+      const xpReward = finalReward;
+      const xnrtReward = finalReward * 0.5;
+
+      await this.updateMiningSession(session.id, {
+        status: "completed",
+        finalReward,
+        endTime: now,
+      });
+
+      const user = await this.getUser(session.userId);
+      if (user) {
+        await this.updateUser(session.userId, {
+          xp: (user.xp || 0) + xpReward,
         });
-
-        const user = await this.getUser(session.userId);
-        if (user) {
-          await this.updateUser(session.userId, {
-            xp: (user.xp || 0) + xpReward,
-          });
-        }
-
-        const balance = await this.getBalance(session.userId);
-        if (balance) {
-          await this.updateBalance(session.userId, {
-            miningBalance: (parseFloat(balance.miningBalance) + xnrtReward).toString(),
-            totalEarned: (parseFloat(balance.totalEarned) + xnrtReward).toString(),
-          });
-        }
-
-        await this.createActivity({
-          userId: session.userId,
-          type: "mining_completed",
-          description: `Auto-completed mining session and earned ${xpReward} XP and ${xnrtReward.toFixed(1)} XNRT`,
-        });
-
-        const { notifyUser } = await import("./notifications");
-        void notifyUser(session.userId, {
-          type: "mining_completed",
-          title: "⛏️ Mining Complete!",
-          message: `You earned ${xpReward} XP and ${xnrtReward.toFixed(1)} XNRT from your 24-hour mining session`,
-          url: "/mining",
-          metadata: {
-            xpReward,
-            xnrtReward: xnrtReward.toString(),
-            sessionId: session.id,
-          },
-        }).catch(err => {
-          console.error('Error sending mining notification (non-blocking):', err);
-        });
-
-        await this.checkAndUnlockAchievements(session.userId);
       }
+
+      const balance = await this.getBalance(session.userId);
+      if (balance) {
+        await this.updateBalance(session.userId, {
+          miningBalance: (
+            parseFloat(balance.miningBalance) + xnrtReward
+          ).toString(),
+          totalEarned: (
+            parseFloat(balance.totalEarned) + xnrtReward
+          ).toString(),
+        });
+      }
+
+      await this.createActivity({
+        userId: session.userId,
+        type: "mining_completed",
+        description: `Auto-completed mining session and earned ${xpReward} XP and ${xnrtReward.toFixed(
+          1
+        )} XNRT`,
+      });
+
+      const { notifyUser } = await import("./notifications");
+      void notifyUser(session.userId, {
+        type: "mining_completed",
+        title: "⛏️ Mining Complete!",
+        message: `You earned ${xpReward} XP and ${xnrtReward.toFixed(
+          1
+        )} XNRT from your 24-hour mining session`,
+        url: "/mining",
+        metadata: {
+          xpReward,
+          xnrtReward: xnrtReward.toString(),
+          sessionId: session.id,
+        },
+      }).catch((err) => {
+        console.error(
+          "Error sending mining notification (non-blocking):",
+          err
+        );
+      });
+
+      await this.checkAndUnlockAchievements(session.userId);
     }
   }
 
-  // Mining operations
-  async getCurrentMiningSession(userId: string): Promise<MiningSession | undefined> {
-    // Find active session
+  // ------------------------ Mining operations ------------------------
+  async getCurrentMiningSession(
+    userId: string
+  ): Promise<MiningSession | undefined> {
     const session = await prisma.miningSession.findFirst({
       where: {
         userId,
         status: "active",
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
 
-    // Auto-complete expired sessions
     if (session && session.endTime && new Date() >= new Date(session.endTime)) {
-      // Calculate final reward based on baseReward and boostPercentage
-      const baseReward = session.baseReward || 10;
-      const boostPercentage = session.boostPercentage || 0;
-      const finalReward = baseReward + Math.floor((baseReward * boostPercentage) / 100);
-      
+      const baseReward = session.baseReward ?? 10;
+      const boostPercentage = session.boostPercentage ?? 0;
+      const finalReward =
+        session.finalReward ??
+        (baseReward + Math.floor((baseReward * boostPercentage) / 100));
+
       const xpReward = finalReward;
       const xnrtReward = finalReward * 0.5;
 
-      // Mark session as completed with updated finalReward
       await this.updateMiningSession(session.id, {
         status: "completed",
-        finalReward: finalReward,
+        finalReward,
         endTime: new Date(),
       });
 
-      // Update user XP
       const user = await this.getUser(userId);
       if (user) {
         await this.updateUser(userId, {
@@ -631,26 +774,27 @@ referredUsername: user.username,
         });
       }
 
-      // Update user balance with XNRT rewards
       const balance = await this.getBalance(userId);
       if (balance) {
         await this.updateBalance(userId, {
-          miningBalance: (parseFloat(balance.miningBalance) + xnrtReward).toString(),
-          totalEarned: (parseFloat(balance.totalEarned) + xnrtReward).toString(),
+          miningBalance: (
+            parseFloat(balance.miningBalance) + xnrtReward
+          ).toString(),
+          totalEarned: (
+            parseFloat(balance.totalEarned) + xnrtReward
+          ).toString(),
         });
       }
 
-      // Log activity
       await this.createActivity({
         userId,
         type: "mining_completed",
-        description: `Completed mining session and earned ${xpReward} XP and ${xnrtReward.toFixed(1)} XNRT`,
+        description: `Completed mining session and earned ${xpReward} XP and ${xnrtReward.toFixed(
+          1
+        )} XNRT`,
       });
 
-      // Check and unlock achievements
       await this.checkAndUnlockAchievements(userId);
-
-      // Return undefined since session is now completed
       return undefined;
     }
 
@@ -660,36 +804,61 @@ referredUsername: user.username,
   async getMiningHistory(userId: string): Promise<MiningSession[]> {
     const sessions = await prisma.miningSession.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: 50,
     });
     return sessions;
   }
 
-  async createMiningSession(session: InsertMiningSession): Promise<MiningSession> {
+  async createMiningSession(
+    session: InsertMiningSession
+  ): Promise<MiningSession> {
+    const now = new Date();
+    const startTime = session.startTime ?? now;
+
+    const defaultEndTime = new Date(
+      startTime.getTime() + 24 * 60 * 60 * 1000
+    );
+    const defaultNextAvailable = new Date(
+      defaultEndTime.getTime() + 60 * 60 * 1000
+    );
+
+    const base = session.baseReward ?? 10;
+    const boost = session.boostPercentage ?? 0;
+    const computedFinal =
+      base + Math.floor((base * boost) / 100);
+
     const newSession = await prisma.miningSession.create({
       data: {
         userId: session.userId,
-        baseReward: session.baseReward || 10,
-        adBoostCount: session.adBoostCount || 0,
-        boostPercentage: session.boostPercentage || 0,
-        finalReward: session.finalReward || 10,
-        startTime: session.startTime || new Date(),
-        endTime: session.endTime,
-        nextAvailable: session.nextAvailable,
-        status: session.status || "active",
+        baseReward: base,
+        adBoostCount: session.adBoostCount ?? 0,
+        boostPercentage: boost,
+        finalReward: session.finalReward ?? computedFinal,
+        startTime,
+        endTime: session.endTime ?? defaultEndTime,
+        nextAvailable: session.nextAvailable ?? defaultNextAvailable,
+        status: session.status ?? "active",
       },
     });
+
     return newSession;
   }
 
-  async updateMiningSession(id: string, updates: Partial<MiningSession>): Promise<MiningSession> {
+  async updateMiningSession(
+    id: string,
+    updates: Partial<MiningSession>
+  ): Promise<MiningSession> {
     const data: any = {};
     if (updates.baseReward !== undefined) data.baseReward = updates.baseReward;
-    if (updates.adBoostCount !== undefined) data.adBoostCount = updates.adBoostCount;
-    if (updates.boostPercentage !== undefined) data.boostPercentage = updates.boostPercentage;
+    if (updates.adBoostCount !== undefined)
+      data.adBoostCount = updates.adBoostCount;
+    if (updates.boostPercentage !== undefined)
+      data.boostPercentage = updates.boostPercentage;
     if (updates.finalReward !== undefined) data.finalReward = updates.finalReward;
     if (updates.endTime !== undefined) data.endTime = updates.endTime;
+    if (updates.nextAvailable !== undefined)
+      data.nextAvailable = updates.nextAvailable;
     if (updates.status !== undefined) data.status = updates.status;
 
     const session = await prisma.miningSession.update({
@@ -713,15 +882,20 @@ referredUsername: user.username,
         referrerId: referral.referrerId,
         referredUserId: referral.referredUserId,
         level: referral.level,
-        totalCommission: new Prisma.Decimal(referral.totalCommission || "0"),
+        totalCommission: new Prisma.Decimal(
+          referral.totalCommission || "0"
+        ),
       },
     });
     return convertPrismaReferral(newReferral);
   }
 
-  async updateReferral(id: string, updates: Partial<Referral>): Promise<Referral> {
+  async updateReferral(
+    id: string,
+    updates: Partial<Referral>
+  ): Promise<Referral> {
     const data: any = {};
-    
+
     if (updates.totalCommission !== undefined) {
       data.totalCommission = new Prisma.Decimal(updates.totalCommission);
     }
@@ -733,9 +907,14 @@ referredUsername: user.username,
     return convertPrismaReferral(referral);
   }
 
-  async distributeReferralCommissions(userId: string, amount: number): Promise<void> {
-    console.log(`[REFERRAL] Starting distribution for userId: ${userId}, amount: ${amount}`);
-    
+  async distributeReferralCommissions(
+    userId: string,
+    amount: number
+  ): Promise<void> {
+    console.log(
+      `[REFERRAL] Starting distribution for userId: ${userId}, amount: ${amount}`
+    );
+
     const COMMISSION_RATES = {
       1: 0.06,
       2: 0.03,
@@ -743,18 +922,26 @@ referredUsername: user.username,
     };
 
     const referrerChain = await this.getReferrerChain(userId, 3);
-    console.log(`[REFERRAL] Referrer chain length: ${referrerChain.length}`, referrerChain.map(r => ({ id: r?.id, email: r?.email })));
+    console.log(
+      `[REFERRAL] Referrer chain length: ${referrerChain.length}`,
+      referrerChain.map((r) => ({ id: r?.id, email: r?.email }))
+    );
 
     for (let level = 1; level <= 3; level++) {
       const referrer = referrerChain[level - 1];
       const commission = amount * COMMISSION_RATES[level as 1 | 2 | 3];
-      console.log(`[REFERRAL] Level ${level}: referrer=${referrer?.email || 'null'}, commission=${commission}`);
+      console.log(
+        `[REFERRAL] Level ${level}: referrer=${
+          referrer?.email || "null"
+        }, commission=${commission}`
+      );
 
-      // If no referrer at this level, credit commission to company admin account
       if (!referrer) {
         const COMPANY_ADMIN_EMAIL = "noahkeaneowen@hotmail.com";
-        console.log(`[REFERRAL] No referrer at level ${level}, using company fallback: ${COMPANY_ADMIN_EMAIL}`);
-        
+        console.log(
+          `[REFERRAL] No referrer at level ${level}, using company fallback: ${COMPANY_ADMIN_EMAIL}`
+        );
+
         const companyAccount = await prisma.user.findFirst({
           where: {
             email: COMPANY_ADMIN_EMAIL,
@@ -763,18 +950,30 @@ referredUsername: user.username,
         });
 
         if (!companyAccount) {
-          console.error(`[REFERRAL] Company admin account not found: ${COMPANY_ADMIN_EMAIL}`);
-          throw new Error(`Company admin account (${COMPANY_ADMIN_EMAIL}) not found - cannot process commission fallback`);
+          console.error(
+            `[REFERRAL] Company admin account not found: ${COMPANY_ADMIN_EMAIL}`
+          );
+          throw new Error(
+            `Company admin account (${COMPANY_ADMIN_EMAIL}) not found - cannot process commission fallback`
+          );
         }
 
-        console.log(`[REFERRAL] Company account found: ${companyAccount.id}, crediting ${commission} XNRT`);
-        
+        console.log(
+          `[REFERRAL] Company account found: ${companyAccount.id}, crediting ${commission} XNRT`
+        );
+
         const companyBalance = await this.getBalance(companyAccount.id);
         if (companyBalance) {
-          const newReferralBalance = (parseFloat(companyBalance.referralBalance) + commission).toString();
-          const newTotalEarned = (parseFloat(companyBalance.totalEarned) + commission).toString();
-          console.log(`[REFERRAL] Updating company balance: referral ${companyBalance.referralBalance} → ${newReferralBalance}`);
-          
+          const newReferralBalance = (
+            parseFloat(companyBalance.referralBalance) + commission
+          ).toString();
+          const newTotalEarned = (
+            parseFloat(companyBalance.totalEarned) + commission
+          ).toString();
+          console.log(
+            `[REFERRAL] Updating company balance: referral ${companyBalance.referralBalance} → ${newReferralBalance}`
+          );
+
           await this.updateBalance(companyAccount.id, {
             referralBalance: newReferralBalance,
             totalEarned: newTotalEarned,
@@ -783,12 +982,14 @@ referredUsername: user.username,
           await this.createActivity({
             userId: companyAccount.id,
             type: "company_commission",
-            description: `Received ${commission.toFixed(2)} XNRT company commission from missing level ${level} referrer`,
+            description: `Received ${commission.toFixed(
+              2
+            )} XNRT company commission from missing level ${level} referrer`,
           });
         }
         continue;
       }
-      
+
       const existingReferral = await prisma.referral.findFirst({
         where: {
           referrerId: referrer.id,
@@ -797,7 +998,9 @@ referredUsername: user.username,
       });
 
       if (existingReferral) {
-        const newCommission = parseFloat(decimalToString(existingReferral.totalCommission)) + commission;
+        const newCommission =
+          parseFloat(decimalToString(existingReferral.totalCommission)) +
+          commission;
         await this.updateReferral(existingReferral.id, {
           totalCommission: newCommission.toString(),
         });
@@ -812,41 +1015,59 @@ referredUsername: user.username,
 
       const referrerBalance = await this.getBalance(referrer.id);
       if (referrerBalance) {
-        const newReferralBalance = (parseFloat(referrerBalance.referralBalance) + commission).toString();
-        const newTotalEarned = (parseFloat(referrerBalance.totalEarned) + commission).toString();
-        console.log(`[REFERRAL] Updating referrer ${referrer.email} balance: referral ${referrerBalance.referralBalance} → ${newReferralBalance}`);
-        
+        const newReferralBalance = (
+          parseFloat(referrerBalance.referralBalance) + commission
+        ).toString();
+        const newTotalEarned = (
+          parseFloat(referrerBalance.totalEarned) + commission
+        ).toString();
+        console.log(
+          `[REFERRAL] Updating referrer ${referrer.email} balance: referral ${referrerBalance.referralBalance} → ${newReferralBalance}`
+        );
+
         await this.updateBalance(referrer.id, {
           referralBalance: newReferralBalance,
           totalEarned: newTotalEarned,
         });
       } else {
-        console.warn(`[REFERRAL] No balance found for referrer ${referrer.email} (${referrer.id})`);
+        console.warn(
+          `[REFERRAL] No balance found for referrer ${referrer.email} (${referrer.id})`
+        );
       }
 
       await this.createActivity({
         userId: referrer.id,
         type: "referral_commission",
-        description: `Earned ${commission.toFixed(2)} XNRT commission from level ${level} referral`,
+        description: `Earned ${commission.toFixed(
+          2
+        )} XNRT commission from level ${level} referral`,
       });
 
       const { notifyUser } = await import("./notifications");
       void notifyUser(referrer.id, {
         type: "referral_commission",
         title: "💰 Referral Bonus!",
-        message: `You earned ${commission.toFixed(2)} XNRT commission from a level ${level} referral`,
+        message: `You earned ${commission.toFixed(
+          2
+        )} XNRT commission from a level ${level} referral`,
         url: "/referrals",
-        metadata: JSON.stringify({amount: commission.toString(),
-level,
-referredUserId: userId,
-}),
-      }).catch(err => {
-        console.error('Error sending referral commission notification (non-blocking):', err);
+        metadata: JSON.stringify({
+          amount: commission.toString(),
+          level,
+          referredUserId: userId,
+        }) as any,
+      }).catch((err) => {
+        console.error(
+          "Error sending referral commission notification (non-blocking):",
+          err
+        );
       });
-      
-      console.log(`[REFERRAL] Level ${level} commission complete for ${referrer.email}`);
+
+      console.log(
+        `[REFERRAL] Level ${level} commission complete for ${referrer.email}`
+      );
     }
-    
+
     console.log(`[REFERRAL] Distribution complete for user ${userId}`);
   }
 
@@ -858,14 +1079,13 @@ referredUserId: userId,
       const currentUser = await prisma.user.findUnique({
         where: { id: currentUserId },
       });
-      
+
       if (!currentUser || !currentUser.referredBy) break;
 
-      // referredBy stores the user ID, not the referral code
       const referrer = await prisma.user.findUnique({
         where: { id: currentUser.referredBy },
       });
-      
+
       if (!referrer) break;
 
       chain.push(convertPrismaUser(referrer));
@@ -876,7 +1096,10 @@ referredUserId: userId,
   }
 
   // Transaction operations
-  async getTransactionsByUser(userId: string, type?: string): Promise<Transaction[]> {
+  async getTransactionsByUser(
+    userId: string,
+    type?: string
+  ): Promise<Transaction[]> {
     const where: any = { userId };
     if (type) {
       where.type = type;
@@ -884,8 +1107,8 @@ referredUserId: userId,
 
     const transactions = await prisma.transaction.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
-      take: 1000, // Limit to 1000 most recent transactions
+      orderBy: { createdAt: "desc" },
+      take: 1000,
     });
     return transactions.map(convertPrismaTransaction);
   }
@@ -897,7 +1120,9 @@ referredUserId: userId,
     return transaction ? convertPrismaTransaction(transaction) : undefined;
   }
 
-  async createTransaction(transaction: InsertTransaction): Promise<Transaction> {
+  async createTransaction(
+    transaction: InsertTransaction
+  ): Promise<Transaction> {
     const data: any = {
       userId: transaction.userId,
       type: transaction.type,
@@ -905,20 +1130,32 @@ referredUserId: userId,
       status: transaction.status || "pending",
     };
 
-    if (transaction.usdtAmount !== undefined && transaction.usdtAmount !== null) {
+    if (transaction.usdtAmount !== undefined && transaction.usdtAmount !== null)
       data.usdtAmount = new Prisma.Decimal(transaction.usdtAmount);
-    }
-    if (transaction.source !== undefined && transaction.source !== null) data.source = transaction.source;
-    if (transaction.walletAddress !== undefined && transaction.walletAddress !== null) {
+    if (transaction.source !== undefined && transaction.source !== null)
+      data.source = transaction.source;
+    if (
+      transaction.walletAddress !== undefined &&
+      transaction.walletAddress !== null
+    ) {
       data.walletAddress = transaction.walletAddress;
     }
-    if (transaction.transactionHash !== undefined && transaction.transactionHash !== null) {
+    if (
+      transaction.transactionHash !== undefined &&
+      transaction.transactionHash !== null
+    ) {
       data.transactionHash = transaction.transactionHash;
     }
-    if (transaction.proofImageUrl !== undefined && transaction.proofImageUrl !== null) {
+    if (
+      transaction.proofImageUrl !== undefined &&
+      transaction.proofImageUrl !== null
+    ) {
       data.proofImageUrl = transaction.proofImageUrl;
     }
-    if (transaction.adminNotes !== undefined && transaction.adminNotes !== null) {
+    if (
+      transaction.adminNotes !== undefined &&
+      transaction.adminNotes !== null
+    ) {
       data.adminNotes = transaction.adminNotes;
     }
     if (transaction.fee !== undefined && transaction.fee !== null) {
@@ -927,10 +1164,16 @@ referredUserId: userId,
     if (transaction.netAmount !== undefined && transaction.netAmount !== null) {
       data.netAmount = new Prisma.Decimal(transaction.netAmount);
     }
-    if (transaction.approvedBy !== undefined && transaction.approvedBy !== null) {
+    if (
+      transaction.approvedBy !== undefined &&
+      transaction.approvedBy !== null
+    ) {
       data.approvedBy = transaction.approvedBy;
     }
-    if (transaction.approvedAt !== undefined && transaction.approvedAt !== null) {
+    if (
+      transaction.approvedAt !== undefined &&
+      transaction.approvedAt !== null
+    ) {
       data.approvedAt = transaction.approvedAt;
     }
     if (transaction.verified !== undefined) {
@@ -939,7 +1182,10 @@ referredUserId: userId,
     if (transaction.confirmations !== undefined) {
       data.confirmations = transaction.confirmations;
     }
-    if (transaction.verificationData !== undefined && transaction.verificationData !== null) {
+    if (
+      transaction.verificationData !== undefined &&
+      transaction.verificationData !== null
+    ) {
       data.verificationData = transaction.verificationData;
     }
 
@@ -947,9 +1193,12 @@ referredUserId: userId,
     return convertPrismaTransaction(newTransaction);
   }
 
-  async updateTransaction(id: string, updates: Partial<Transaction>): Promise<Transaction> {
+  async updateTransaction(
+    id: string,
+    updates: Partial<Transaction>
+  ): Promise<Transaction> {
     const data: any = {};
-    
+
     if (updates.amount !== undefined && updates.amount !== null) {
       data.amount = new Prisma.Decimal(updates.amount);
     }
@@ -957,7 +1206,10 @@ referredUserId: userId,
       data.usdtAmount = new Prisma.Decimal(updates.usdtAmount);
     }
     if (updates.status !== undefined) data.status = updates.status;
-    if (updates.adminNotes !== undefined && updates.adminNotes !== null) {
+    if (
+      updates.adminNotes !== undefined &&
+      updates.adminNotes !== null
+    ) {
       data.adminNotes = updates.adminNotes;
     }
     if (updates.fee !== undefined && updates.fee !== null) {
@@ -966,10 +1218,16 @@ referredUserId: userId,
     if (updates.netAmount !== undefined && updates.netAmount !== null) {
       data.netAmount = new Prisma.Decimal(updates.netAmount);
     }
-    if (updates.approvedBy !== undefined && updates.approvedBy !== null) {
+    if (
+      updates.approvedBy !== undefined &&
+      updates.approvedBy !== null
+    ) {
       data.approvedBy = updates.approvedBy;
     }
-    if (updates.approvedAt !== undefined && updates.approvedAt !== null) {
+    if (
+      updates.approvedAt !== undefined &&
+      updates.approvedAt !== null
+    ) {
       data.approvedAt = updates.approvedAt;
     }
     if (updates.verified !== undefined) {
@@ -978,7 +1236,10 @@ referredUserId: userId,
     if (updates.confirmations !== undefined) {
       data.confirmations = updates.confirmations;
     }
-    if (updates.verificationData !== undefined && updates.verificationData !== null) {
+    if (
+      updates.verificationData !== undefined &&
+      updates.verificationData !== null
+    ) {
       data.verificationData = updates.verificationData;
     }
 
@@ -997,8 +1258,8 @@ referredUserId: userId,
 
     const transactions = await prisma.transaction.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
-      take: 1000, // Limit to 1000 most recent transactions
+      orderBy: { createdAt: "desc" },
+      take: 1000,
     });
     return transactions.map(convertPrismaTransaction);
   }
@@ -1017,7 +1278,7 @@ referredUserId: userId,
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
     return transactions.map(convertPrismaTransaction);
   }
@@ -1051,12 +1312,17 @@ referredUserId: userId,
     return convertPrismaUserTask(newUserTask);
   }
 
-  async updateUserTask(id: string, updates: Partial<UserTask>): Promise<UserTask> {
+  async updateUserTask(
+    id: string,
+    updates: Partial<UserTask>
+  ): Promise<UserTask> {
     const data: any = {};
     if (updates.progress !== undefined) data.progress = updates.progress;
-    if (updates.maxProgress !== undefined) data.maxProgress = updates.maxProgress;
+    if (updates.maxProgress !== undefined)
+      data.maxProgress = updates.maxProgress;
     if (updates.completed !== undefined) data.completed = updates.completed;
-    if (updates.completedAt !== undefined) data.completedAt = updates.completedAt;
+    if (updates.completedAt !== undefined)
+      data.completedAt = updates.completedAt;
 
     const userTask = await prisma.userTask.update({
       where: { id },
@@ -1076,7 +1342,9 @@ referredUserId: userId,
     });
   }
 
-  async createUserAchievement(userAchievement: InsertUserAchievement): Promise<UserAchievement> {
+  async createUserAchievement(
+    userAchievement: InsertUserAchievement
+  ): Promise<UserAchievement> {
     const newUserAchievement = await prisma.userAchievement.create({
       data: {
         userId: userAchievement.userId,
@@ -1095,16 +1363,19 @@ referredUserId: userId,
 
     const allAchievements = await this.getAllAchievements();
     const userAchievementsList = await this.getUserAchievements(userId);
-    const unlockedIds = new Set(userAchievementsList.map(ua => ua.achievementId));
+    const unlockedIds = new Set(
+      userAchievementsList.map((ua) => ua.achievementId)
+    );
 
     const totalEarned = parseFloat(balance.totalEarned);
     const userReferrals = await this.getReferralsByReferrer(userId);
-    const directReferrals = userReferrals.filter(r => r.level === 1);
+    const directReferrals = userReferrals.filter((r) => r.level === 1);
     const miningSessions = await this.getMiningHistory(userId);
-    const completedMining = miningSessions.filter(s => s.status === "completed");
+    const completedMining = miningSessions.filter(
+      (s) => s.status === "completed"
+    );
 
     let totalXpReward = 0;
-    const unlockedAchievements: Achievement[] = [];
 
     for (const achievement of allAchievements) {
       if (unlockedIds.has(achievement.id)) continue;
@@ -1133,7 +1404,6 @@ referredUserId: userId,
         });
 
         totalXpReward += achievement.xpReward;
-        unlockedAchievements.push(achievement);
 
         await this.createActivity({
           userId,
@@ -1152,8 +1422,11 @@ referredUserId: userId,
             achievementTitle: achievement.title,
             xpReward: achievement.xpReward,
           },
-        }).catch(err => {
-          console.error('Error sending achievement notification (non-blocking):', err);
+        }).catch((err) => {
+          console.error(
+            "Error sending achievement notification (non-blocking):",
+            err
+          );
         });
       }
     }
@@ -1168,6 +1441,27 @@ referredUserId: userId,
     }
   }
 
+  async getAchievementsWithUnlockCount(): Promise<
+    (Achievement & { unlockCount: number })[]
+  > {
+    const achievements = await prisma.achievement.findMany({
+      orderBy: { requirement: "asc" },
+    });
+
+    const counts = await Promise.all(
+      achievements.map((achievement) =>
+        prisma.userAchievement.count({
+          where: { achievementId: achievement.id },
+        })
+      )
+    );
+
+    return achievements.map((achievement, index) => ({
+      ...(achievement as any),
+      unlockCount: counts[index] ?? 0,
+    })) as (Achievement & { unlockCount: number })[];
+  }
+
   // Activity operations
   async createActivity(activity: InsertActivity): Promise<Activity> {
     const data: any = {
@@ -1175,7 +1469,7 @@ referredUserId: userId,
       type: activity.type,
       description: activity.description,
     };
-    
+
     if (activity.metadata !== undefined && activity.metadata !== null) {
       data.metadata = activity.metadata;
     }
@@ -1184,17 +1478,22 @@ referredUserId: userId,
     return convertPrismaActivity(newActivity);
   }
 
-  async getActivities(userId: string, limit: number = 10): Promise<Activity[]> {
+  async getActivities(
+    userId: string,
+    limit: number = 10
+  ): Promise<Activity[]> {
     const activities = await prisma.activity.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: limit,
     });
     return activities.map(convertPrismaActivity);
   }
 
   // Notification operations
-  async createNotification(notification: InsertNotification): Promise<Notification> {
+  async createNotification(
+    notification: InsertNotification
+  ): Promise<Notification> {
     const data: any = {
       userId: notification.userId,
       type: notification.type,
@@ -1202,8 +1501,11 @@ referredUserId: userId,
       message: notification.message,
       read: notification.read || false,
     };
-    
-    if (notification.metadata !== undefined && notification.metadata !== null) {
+
+    if (
+      notification.metadata !== undefined &&
+      notification.metadata !== null
+    ) {
       data.metadata = JSON.stringify(notification.metadata);
     }
 
@@ -1211,10 +1513,13 @@ referredUserId: userId,
     return convertPrismaNotification(newNotification);
   }
 
-  async getNotifications(userId: string, limit: number = 20): Promise<Notification[]> {
+  async getNotifications(
+    userId: string,
+    limit: number = 20
+  ): Promise<Notification[]> {
     const notifications = await prisma.notification.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: limit,
     });
     return notifications.map(convertPrismaNotification);
@@ -1222,7 +1527,7 @@ referredUserId: userId,
 
   async getUnreadNotificationCount(userId: string): Promise<number> {
     return await prisma.notification.count({
-      where: { 
+      where: {
         userId,
         read: false,
       },
@@ -1239,7 +1544,7 @@ referredUserId: userId,
 
   async markAllNotificationsAsRead(userId: string): Promise<void> {
     await prisma.notification.updateMany({
-      where: { 
+      where: {
         userId,
         read: false,
       },
@@ -1247,8 +1552,10 @@ referredUserId: userId,
     });
   }
 
-  async getNotificationsPendingPush(limit: number = 50): Promise<Notification[]> {
-    // @ts-ignore - pendingPush field exists in runtime but LSP cache issue
+  async getNotificationsPendingPush(
+    limit: number = 50
+  ): Promise<Notification[]> {
+    // @ts-ignore pendingPush field exists in runtime but may not be in local type cache
     const notifications = await prisma.notification.findMany({
       where: {
         pendingPush: true,
@@ -1256,24 +1563,31 @@ referredUserId: userId,
           lt: 5,
         },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: "asc" },
       take: limit,
     });
     return notifications.map(convertPrismaNotification);
   }
 
-  async updateNotificationDelivery(id: string, updates: {
-    deliveredAt?: Date;
-    deliveryAttempts?: number;
-    lastAttemptAt?: Date;
-    pendingPush?: boolean;
-    pushError?: string;
-  }): Promise<Notification> {
+  async updateNotificationDelivery(
+    id: string,
+    updates: {
+      deliveredAt?: Date;
+      deliveryAttempts?: number;
+      lastAttemptAt?: Date;
+      pendingPush?: boolean;
+      pushError?: string;
+    }
+  ): Promise<Notification> {
     const data: any = {};
-    if (updates.deliveredAt !== undefined) data.deliveredAt = updates.deliveredAt;
-    if (updates.deliveryAttempts !== undefined) data.deliveryAttempts = updates.deliveryAttempts;
-    if (updates.lastAttemptAt !== undefined) data.lastAttemptAt = updates.lastAttemptAt;
-    if (updates.pendingPush !== undefined) data.pendingPush = updates.pendingPush;
+    if (updates.deliveredAt !== undefined)
+      data.deliveredAt = updates.deliveredAt;
+    if (updates.deliveryAttempts !== undefined)
+      data.deliveryAttempts = updates.deliveryAttempts;
+    if (updates.lastAttemptAt !== undefined)
+      data.lastAttemptAt = updates.lastAttemptAt;
+    if (updates.pendingPush !== undefined)
+      data.pendingPush = updates.pendingPush;
     if (updates.pushError !== undefined) data.pushError = updates.pushError;
 
     const notification = await prisma.notification.update({
@@ -1284,7 +1598,10 @@ referredUserId: userId,
   }
 
   // Push Subscription operations
-  async getPushSubscription(userId: string, endpoint: string): Promise<PushSubscription | null> {
+  async getPushSubscription(
+    userId: string,
+    endpoint: string
+  ): Promise<PushSubscription | null> {
     try {
       const subscription = await prisma.pushSubscription.findFirst({
         where: { userId, endpoint },
@@ -1296,7 +1613,9 @@ referredUserId: userId,
     }
   }
 
-  async createPushSubscription(data: InsertPushSubscription): Promise<PushSubscription> {
+  async createPushSubscription(
+    data: InsertPushSubscription
+  ): Promise<PushSubscription> {
     try {
       const subscription = await prisma.pushSubscription.upsert({
         where: {
@@ -1328,7 +1647,10 @@ referredUserId: userId,
     }
   }
 
-  async deletePushSubscription(userId: string, endpoint: string): Promise<void> {
+  async deletePushSubscription(
+    userId: string,
+    endpoint: string
+  ): Promise<void> {
     try {
       await prisma.pushSubscription.deleteMany({
         where: { userId, endpoint },
@@ -1339,11 +1661,13 @@ referredUserId: userId,
     }
   }
 
-  async getUserPushSubscriptions(userId: string): Promise<PushSubscription[]> {
+  async getUserPushSubscriptions(
+    userId: string
+  ): Promise<PushSubscription[]> {
     try {
       const subscriptions = await prisma.pushSubscription.findMany({
         where: { userId, enabled: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
       });
       return subscriptions.map(convertPrismaPushSubscription);
     } catch (error) {
@@ -1364,31 +1688,37 @@ referredUserId: userId,
   }
 
   // XP Leaderboard operations
-  async getXPLeaderboard(currentUserId: string, period: string, category: string, isAdmin: boolean = false): Promise<any> {
-    // Calculate date range based on period
+  async getXPLeaderboard(
+    currentUserId: string,
+    period: string,
+    category: string,
+    isAdmin: boolean = false
+  ): Promise<{ leaderboard: any[]; userPosition: any | null }> {
     const now = new Date();
     let startDate: Date | null = null;
-    
+
     switch (period) {
-      case 'daily':
+      case "daily":
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         break;
-      case 'weekly':
+      case "weekly": {
         const dayOfWeek = now.getDay();
-        startDate = new Date(now.getTime() - dayOfWeek * 24 * 60 * 60 * 1000);
+        startDate = new Date(
+          now.getTime() - dayOfWeek * 24 * 60 * 60 * 1000
+        );
         startDate.setHours(0, 0, 0, 0);
         break;
-      case 'monthly':
+      }
+      case "monthly":
         startDate = new Date(now.getFullYear(), now.getMonth(), 1);
         break;
-      case 'all-time':
+      case "all-time":
       default:
         startDate = null;
         break;
     }
 
-    if (category === 'overall') {
-      // Overall: Rank by total user XP
+    if (category === "overall") {
       const users = await prisma.user.findMany({
         select: {
           id: true,
@@ -1396,8 +1726,8 @@ referredUserId: userId,
           email: true,
           xp: true,
         },
-        orderBy: { xp: 'desc' },
-        take: 100, // Get top 100 to find current user
+        orderBy: { xp: "desc" },
+        take: 100,
       });
 
       const leaderboard = users.slice(0, 10).map((user, index) => {
@@ -1406,7 +1736,7 @@ referredUserId: userId,
           categoryXp: user.xp,
           rank: index + 1,
         };
-        
+
         if (isAdmin) {
           return {
             ...baseData,
@@ -1415,26 +1745,25 @@ referredUserId: userId,
             email: user.email,
             displayName: user.username || user.email,
           };
-        } else {
-          return {
-            ...baseData,
-            displayName: generateAnonymizedHandle(user.id),
-          };
         }
+
+        return {
+          ...baseData,
+          displayName: generateAnonymizedHandle(user.id),
+        };
       });
 
-      // Find current user position
-      const currentUserRank = users.findIndex(u => u.id === currentUserId);
-      let userPosition = null;
+      const currentUserRank = users.findIndex((u) => u.id === currentUserId);
+      let userPosition: any = null;
 
-      if (currentUserRank > 9) {
+      if (currentUserRank !== -1 && currentUserRank > 9) {
         const currentUser = users[currentUserRank];
         const baseData = {
           xp: currentUser.xp,
           categoryXp: currentUser.xp,
           rank: currentUserRank + 1,
         };
-        
+
         if (isAdmin) {
           userPosition = {
             ...baseData,
@@ -1446,119 +1775,121 @@ referredUserId: userId,
         } else {
           userPosition = {
             ...baseData,
-            displayName: 'You',
-          };
-        }
-      }
-
-      return { leaderboard, userPosition };
-    } else {
-      // Category-specific: Calculate from activities
-      const typeFilter = category === 'mining' ? 'mining' : category === 'staking' ? 'stak' : 'referral';
-      
-      // Get top 100 users by overall XP to limit scope (performance optimization)
-      const users = await prisma.user.findMany({
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          xp: true,
-        },
-        orderBy: { xp: 'desc' },
-        take: 100,
-      });
-
-      // Calculate category XP for each user
-      const userXPData = await Promise.all(
-        users.map(async (user) => {
-          const whereClause: any = {
-            userId: user.id,
-            type: { contains: typeFilter },
-          };
-          
-          if (startDate) {
-            whereClause.createdAt = { gte: startDate };
-          }
-
-          const activities = await prisma.activity.findMany({
-            where: whereClause,
-          });
-
-          // Extract XP from activity descriptions
-          let categoryXp = 0;
-          activities.forEach(activity => {
-            const xpMatch = activity.description.match(/(\d+)\s*XP/i);
-            if (xpMatch) {
-              categoryXp += parseInt(xpMatch[1]);
-            }
-          });
-
-          return {
-            userId: user.id,
-            username: user.username,
-            email: user.email,
-            xp: user.xp,
-            categoryXp,
-          };
-        })
-      );
-
-      // Sort by category XP
-      userXPData.sort((a, b) => b.categoryXp - a.categoryXp);
-
-      const leaderboard = userXPData.slice(0, 10).map((user, index) => {
-        const baseData = {
-          xp: user.xp,
-          categoryXp: user.categoryXp,
-          rank: index + 1,
-        };
-        
-        if (isAdmin) {
-          return {
-            ...baseData,
-            userId: user.userId,
-            username: user.username,
-            email: user.email,
-            displayName: user.username || user.email,
-          };
-        } else {
-          return {
-            ...baseData,
-            displayName: generateAnonymizedHandle(user.userId),
-          };
-        }
-      });
-
-      // Find current user position
-      const currentUserRank = userXPData.findIndex(u => u.userId === currentUserId);
-      let userPosition = null;
-
-      if (currentUserRank > 9) {
-        const currentUser = userXPData[currentUserRank];
-        const baseData = {
-          xp: currentUser.xp,
-          categoryXp: currentUser.categoryXp,
-          rank: currentUserRank + 1,
-        };
-        
-        if (isAdmin) {
-          userPosition = {
-            ...baseData,
-            userId: currentUser.userId,
-            username: currentUser.username,
-            email: currentUser.email,
-            displayName: currentUser.username || currentUser.email,
-          };
-        } else {
-          userPosition = {
-            ...baseData,
-            displayName: 'You',
+            displayName: "You",
           };
         }
       }
 
       return { leaderboard, userPosition };
     }
+
+    const typeFilter =
+      category === "mining"
+        ? "mining"
+        : category === "staking"
+        ? "stak"
+        : "referral";
+
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        xp: true,
+      },
+      orderBy: { xp: "desc" },
+      take: 100,
+    });
+
+    const userXPData = await Promise.all(
+      users.map(async (user) => {
+        const whereClause: any = {
+          userId: user.id,
+          type: { contains: typeFilter },
+        };
+
+        if (startDate) {
+          whereClause.createdAt = { gte: startDate };
+        }
+
+        const activities = await prisma.activity.findMany({
+          where: whereClause,
+        });
+
+        let categoryXp = 0;
+        for (const activity of activities) {
+          const desc = activity.description || "";
+          const xpMatch = desc.match(/(\d+)\s*XP/i);
+          if (xpMatch) {
+            categoryXp += parseInt(xpMatch[1], 10);
+          }
+        }
+
+        return {
+          userId: user.id,
+          username: user.username,
+          email: user.email,
+          xp: user.xp,
+          categoryXp,
+        };
+      })
+    );
+
+    userXPData.sort((a, b) => b.categoryXp - a.categoryXp);
+
+    const leaderboard = userXPData.slice(0, 10).map((user, index) => {
+      const baseData = {
+        xp: user.xp,
+        categoryXp: user.categoryXp,
+        rank: index + 1,
+      };
+
+      if (isAdmin) {
+        return {
+          ...baseData,
+          userId: user.userId,
+          username: user.username,
+          email: user.email,
+          displayName: user.username || user.email,
+        };
+      }
+
+      return {
+        ...baseData,
+        displayName: generateAnonymizedHandle(user.userId),
+      };
+    });
+
+    const currentUserRank = userXPData.findIndex(
+      (u) => u.userId === currentUserId
+    );
+    let userPosition: any = null;
+
+    if (currentUserRank !== -1 && currentUserRank > 9) {
+      const currentUser = userXPData[currentUserRank];
+      const baseData = {
+        xp: currentUser.xp,
+        categoryXp: currentUser.categoryXp,
+        rank: currentUserRank + 1,
+      };
+
+      if (isAdmin) {
+        userPosition = {
+          ...baseData,
+          userId: currentUser.userId,
+          username: currentUser.username,
+          email: currentUser.email,
+          displayName: currentUser.username || currentUser.email,
+        };
+      } else {
+        userPosition = {
+          ...baseData,
+          displayName: "You",
+        };
+      }
+    }
+
+    return { leaderboard, userPosition };
   }
 
   // Raw query support

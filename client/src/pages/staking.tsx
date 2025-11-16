@@ -1,3 +1,5 @@
+// client/src/pages/staking.tsx
+
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +16,10 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Gem, TrendingUp, Clock, AlertCircle, Sparkles, Wallet, ArrowUpRight, History, BarChart3, ArrowUpDown } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { STAKING_TIERS, type StakingTier, type Stake, type Balance } from "@shared/schema";
+// --- FIX: Import Trust Loan config ---
+import { TRUST_LOAN_CONFIG } from "../../../shared/trust-loan";
 import { isUnauthorizedError } from "@/lib/authUtils";
+import TrustLoanCard from "../components/TrustLoanCard";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 // Real-time countdown component
@@ -65,6 +70,8 @@ const tierIcons = {
   legendary_emerald: "🟢",
   imperial_platinum: "⚪",
   mythic_diamond: "💠",
+  // --- FIX: Add Trust Loan icon ---
+  [TRUST_LOAN_CONFIG.programKey]: "💰",
 };
 
 const tierGradients = {
@@ -72,6 +79,8 @@ const tierGradients = {
   legendary_emerald: "from-emerald-500 to-green-500",
   imperial_platinum: "from-slate-400 to-zinc-400",
   mythic_diamond: "from-purple-500 to-pink-500",
+  // --- FIX: Add Trust Loan gradient ---
+  [TRUST_LOAN_CONFIG.programKey]: "from-yellow-500 to-orange-500",
 };
 
 export default function Staking() {
@@ -275,8 +284,10 @@ export default function Staking() {
     
     withdrawnStakes.forEach(stake => {
       if (!tierStats[stake.tier]) {
+        // --- FIX: Handle potential missing tier config (though schema update should prevent this) ---
+        const tierName = STAKING_TIERS[stake.tier as StakingTier]?.name || stake.tier;
         tierStats[stake.tier] = {
-          tier: STAKING_TIERS[stake.tier as StakingTier].name,
+          tier: tierName,
           totalProfit: 0,
           count: 0,
         };
@@ -334,44 +345,53 @@ export default function Staking() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {(Object.entries(STAKING_TIERS) as [StakingTier, typeof STAKING_TIERS[StakingTier]][]).map(([key, tier]) => (
-          <Card
-            key={key}
-            className={`cursor-pointer transition-all hover-elevate ${
-              selectedTier === key ? "border-primary ring-2 ring-primary/20" : ""
-            }`}
-            onClick={() => {
-              setSelectedTier(key);
-              setShowCreateDialog(true);
-            }}
-            data-testid={`tier-${key}`}
-          >
-            <CardHeader>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-3xl">{tierIcons[key]}</span>
-                <div>
-                  <CardTitle className="text-lg">{tier.name}</CardTitle>
-                  <CardDescription>{tier.duration} days</CardDescription>
+        {(Object.entries(STAKING_TIERS) as [StakingTier, typeof STAKING_TIERS[StakingTier]][]).map(([key, tier]) => {
+          // --- FIX: Filter out the Trust Loan tier from this list ---
+          if (key === TRUST_LOAN_CONFIG.programKey) return null;
+
+          return (
+            <Card
+              key={key}
+              className={`cursor-pointer transition-all hover-elevate ${
+                selectedTier === key ? "border-primary ring-2 ring-primary/20" : ""
+              }`}
+              onClick={() => {
+                setSelectedTier(key);
+                setShowCreateDialog(true);
+              }}
+              data-testid={`tier-${key}`}
+            >
+              <CardHeader>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-3xl">{tierIcons[key]}</span>
+                  <div>
+                    <CardTitle className="text-lg">{tier.name}</CardTitle>
+                    <CardDescription>{tier.duration} days</CardDescription>
+                  </div>
                 </div>
-              </div>
-              <div className={`text-3xl font-bold bg-gradient-to-r ${tierGradients[key]} bg-clip-text text-transparent`}>
-                {tier.apy}% APY
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Daily Rate:</span>
-                <span className="font-semibold">{tier.dailyRate}%</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Min/Max:</span>
-                <span className="font-semibold">
-                  {tier.minAmount.toLocaleString()}/{tier.maxAmount.toLocaleString()}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                <div className={`text-3xl font-bold bg-gradient-to-r ${tierGradients[key]} bg-clip-text text-transparent`}>
+                  {tier.apy}% APY
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Daily Rate:</span>
+                  <span className="font-semibold">{tier.dailyRate}%</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Min/Max:</span>
+                  <span className="font-semibold">
+                    {tier.minAmount.toLocaleString()}/{tier.maxAmount.toLocaleString()}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <TrustLoanCard />
       </div>
 
       {/* Create Stake Modal */}
@@ -487,7 +507,8 @@ export default function Staking() {
                       <CardHeader>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="text-2xl">{tierIcons[stake.tier as StakingTier]}</span>
+                            {/* --- FIX: Use correct icon key --- */}
+                            <span className="text-2xl">{tierIcons[stake.tier as keyof typeof tierIcons]}</span>
                             <div>
                               <CardTitle className="text-base">{tierConfig.name}</CardTitle>
                               <CardDescription>{parseFloat(stake.amount).toLocaleString()} XNRT</CardDescription>
@@ -576,6 +597,8 @@ export default function Staking() {
                   <SelectItem value="legendary_emerald">Legendary Emerald</SelectItem>
                   <SelectItem value="imperial_platinum">Imperial Platinum</SelectItem>
                   <SelectItem value="mythic_diamond">Mythic Diamond</SelectItem>
+                  {/* --- FIX: Add Trust Loan to filter --- */}
+                  <SelectItem value={TRUST_LOAN_CONFIG.programKey}>Trust Loan</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={historySortBy} onValueChange={setHistorySortBy}>
@@ -611,7 +634,8 @@ export default function Staking() {
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <span className="text-2xl">{tierIcons[stake.tier as StakingTier]}</span>
+                          {/* --- FIX: Use correct icon key --- */}
+                          <span className="text-2xl">{tierIcons[stake.tier as keyof typeof tierIcons]}</span>
                           <div>
                             <div className="flex items-center gap-2">
                               <p className="font-semibold">{tierConfig.name}</p>

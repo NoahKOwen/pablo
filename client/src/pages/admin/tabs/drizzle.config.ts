@@ -1,13 +1,3 @@
-/**
- * Auto-generated drizzle.config.ts
- * - Ensures drizzle-kit receives `dialect: "postgresql"` (required)
- * - Accepts DATABASE_URL or individual PG* env vars
- * - Uses ssl.rejectUnauthorized: true by default (Neon)
- *
- * If you need different SSL handling for local debugging,
- * modify the ssl property below.
- */
-
 import { defineConfig } from "drizzle-kit";
 
 function parseDatabaseUrl(url?: string) {

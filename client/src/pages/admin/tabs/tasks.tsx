@@ -1,436 +1,396 @@
+// client/src/pages/tasks.tsx
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Plus, Pencil, Trash2, Search, ListChecks, ToggleLeft, ToggleRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useState } from "react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  ListChecks,
+  CheckCircle2,
+  Sparkles,
+  Calendar,
+  Star,
+} from "lucide-react";
+import type { Task, UserTask } from "@shared/schema";
+import { isUnauthorizedError } from "@/lib/authUtils";
+import { useAuth } from "@/hooks/useAuth";
+import { useConfetti } from "@/hooks/use-confetti";
 
-interface Task {
-  id: string;
-  title: string;
-  description: string;
-  xpReward: number;
-  xnrtReward: string;
-  category: string;
-  requirements: string | null;
-  isActive: boolean;
-  completionCount: number;
-}
+type UserTaskWithTask = UserTask & {
+  task: Task;
+};
 
-export default function TasksTab() {
+export default function Tasks() {
   const { toast } = useToast();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const { user } = useAuth();
+  const { celebrate } = useConfetti();
 
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    xpReward: "",
-    xnrtReward: "0",
-    category: "daily",
-    requirements: "",
-    isActive: true,
+  const {
+    data: userTasks,
+    isLoading,
+  } = useQuery<UserTaskWithTask[]>({
+    queryKey: ["/api/tasks/user"],
   });
 
-  const { data: tasks, isLoading } = useQuery<Task[]>({
-    queryKey: ["/api/admin/tasks"],
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
-      return await apiRequest("POST", "/api/admin/tasks", data);
+  const completeTaskMutation = useMutation({
+    mutationFn: async (taskId: string) => {
+      const res = await apiRequest(
+        "POST",
+        `/api/tasks/${taskId}/complete`,
+        {}
+      );
+      // response JSON -> { xpReward, xnrtReward }
+      const data = (await res.json()) as {
+        xpReward: number;
+        xnrtReward: number;
+      };
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/tasks"] });
-      setCreateDialogOpen(false);
-      setFormData({
-        title: "",
-        description: "",
-        xpReward: "",
-        xnrtReward: "0",
-        category: "daily",
-        requirements: "",
-        isActive: true,
+    onSuccess: (data) => {
+      const previousXP = user?.xp ?? 0;
+      const newXP = previousXP + (data.xpReward || 0);
+      const previousLevel = Math.floor(previousXP / 1000) + 1;
+      const newLevel = Math.floor(newXP / 1000) + 1;
+      const leveledUp = newLevel > previousLevel;
+
+      toast({
+        title: "Task Completed!",
+        description: `You earned ${data.xpReward} XP and ${data.xnrtReward} XNRT!`,
       });
-      toast({ title: "Success", description: "Task created successfully" });
+
+      if (leveledUp) {
+        celebrate("levelup");
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks/user"] });
+      queryClient.invalidateQueries({ queryKey: ["/auth/me"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/balance"] });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to create task", variant: "destructive" });
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: error.message || "Failed to complete task",
+        variant: "destructive",
+      });
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
-      return await apiRequest("PUT", `/api/admin/tasks/${id}`, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/tasks"] });
-      setEditDialogOpen(false);
-      setSelectedTask(null);
-      toast({ title: "Success", description: "Task updated successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to update task", variant: "destructive" });
-    },
-  });
+  const allTasks = userTasks ?? [];
 
-  const toggleMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return await apiRequest("PATCH", `/api/admin/tasks/${id}/toggle`, {});
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/tasks"] });
-      toast({ title: "Success", description: "Task status toggled successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to toggle task", variant: "destructive" });
-    },
-  });
+  const dailyTasks = allTasks.filter((t) => t.task.category === "daily");
+  const weeklyTasks = allTasks.filter((t) => t.task.category === "weekly");
+  const specialTasks = allTasks.filter((t) => t.task.category === "special");
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return await apiRequest("DELETE", `/api/admin/tasks/${id}`, {});
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/tasks"] });
-      setDeleteDialogOpen(false);
-      setSelectedTask(null);
-      toast({ title: "Success", description: "Task deleted successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete task", variant: "destructive" });
-    },
-  });
-
-  const filteredTasks = tasks?.filter((task) => {
-    const matchesSearch =
-      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === "all" || task.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
-
-  const handleEdit = (task: Task) => {
-    setSelectedTask(task);
-    setFormData({
-      title: task.title,
-      description: task.description,
-      xpReward: task.xpReward.toString(),
-      xnrtReward: task.xnrtReward,
-      category: task.category,
-      requirements: task.requirements || "",
-      isActive: task.isActive,
-    });
-    setEditDialogOpen(true);
-  };
-
-  const handleDelete = (task: Task) => {
-    setSelectedTask(task);
-    setDeleteDialogOpen(true);
-  };
+  const completedCount = (tasks: UserTaskWithTask[]) =>
+    tasks.filter((t) => t.completed).length;
 
   return (
     <div className="space-y-6">
-      {/* Header and Actions */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-              data-testid="input-search-tasks"
-            />
-          </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[150px]" data-testid="select-category-filter">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="daily">Daily</SelectItem>
-              <SelectItem value="weekly">Weekly</SelectItem>
-              <SelectItem value="special">Special</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-create-task">
-          <Plus className="h-4 w-4 mr-2" />
-          Create Task
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold font-serif">Tasks</h1>
+        <p className="text-muted-foreground">
+          Complete tasks to earn XP and XNRT rewards
+        </p>
       </div>
 
-      {/* Tasks Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ListChecks className="h-5 w-5" />
-            Tasks Management
-          </CardTitle>
-          <CardDescription>Manage platform tasks and challenges</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      {/* Top summary cards */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="border-primary/10 bg-gradient-to-br from-card to-primary/5">
+          <CardContent className="p-6">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Daily Tasks</p>
+              <Calendar className="h-5 w-5 text-chart-1" />
             </div>
-          ) : filteredTasks && filteredTasks.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Rewards</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Completions</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredTasks.map((task) => (
-                  <TableRow key={task.id} data-testid={`row-task-${task.id}`}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{task.title}</div>
-                        <div className="text-xs text-muted-foreground line-clamp-1">{task.description}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{task.category}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-sm">
-                        <div>{task.xpReward} XP</div>
-                        {parseFloat(task.xnrtReward) > 0 && (
-                          <div className="text-muted-foreground">{parseFloat(task.xnrtReward).toLocaleString()} XNRT</div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant={task.isActive ? "default" : "secondary"}
-                        onClick={() => toggleMutation.mutate(task.id)}
-                        data-testid={`button-toggle-${task.id}`}
-                      >
-                        {task.isActive ? (
-                          <>
-                            <ToggleRight className="h-4 w-4 mr-1" />
-                            Active
-                          </>
-                        ) : (
-                          <>
-                            <ToggleLeft className="h-4 w-4 mr-1" />
-                            Inactive
-                          </>
-                        )}
-                      </Button>
-                    </TableCell>
-                    <TableCell>{task.completionCount}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleEdit(task)}
-                          data-testid={`button-edit-${task.id}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDelete(task)}
-                          data-testid={`button-delete-${task.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-center py-8 text-muted-foreground">No tasks found</p>
-          )}
-        </CardContent>
-      </Card>
+            <p className="font-mono text-3xl font-bold">
+              {completedCount(dailyTasks)}/{dailyTasks.length}
+            </p>
+          </CardContent>
+        </Card>
 
-      {/* Create/Edit Dialog */}
-      <Dialog open={createDialogOpen || editDialogOpen} onOpenChange={(open) => {
-        if (!open) {
-          setCreateDialogOpen(false);
-          setEditDialogOpen(false);
-        }
-      }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{editDialogOpen ? "Edit Task" : "Create New Task"}</DialogTitle>
-            <DialogDescription>
-              {editDialogOpen ? "Update task details" : "Add a new task to the platform"}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Title</Label>
-              <Input
-                id="title"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="Complete your first stake"
-                data-testid="input-title"
+        <Card className="border-primary/10 bg-gradient-to-br from-card to-chart-2/10">
+          <CardContent className="p-6">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Weekly Tasks</p>
+              <Star className="h-5 w-5 text-chart-2" />
+            </div>
+            <p className="font-mono text-3xl font-bold">
+              {completedCount(weeklyTasks)}/{weeklyTasks.length}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-primary/10 bg-gradient-to-br from-card to-chart-5/10">
+          <CardContent className="p-6">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Special Tasks</p>
+              <Sparkles className="h-5 w-5 text-chart-5" />
+            </div>
+            <p className="font-mono text-3xl font-bold">
+              {completedCount(specialTasks)}/{specialTasks.length}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Loading state */}
+      {isLoading && (
+        <Card>
+          <CardContent className="space-y-3 p-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-20 animate-pulse rounded-md bg-muted/60"
               />
-            </div>
-            <div>
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Stake any amount to complete this task"
-                rows={3}
-                data-testid="input-description"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="xpReward">XP Reward</Label>
-                <Input
-                  id="xpReward"
-                  type="number"
-                  value={formData.xpReward}
-                  onChange={(e) => setFormData({ ...formData, xpReward: e.target.value })}
-                  placeholder="100"
-                  data-testid="input-xp-reward"
-                />
-              </div>
-              <div>
-                <Label htmlFor="xnrtReward">XNRT Reward</Label>
-                <Input
-                  id="xnrtReward"
-                  type="number"
-                  value={formData.xnrtReward}
-                  onChange={(e) => setFormData({ ...formData, xnrtReward: e.target.value })}
-                  placeholder="0"
-                  data-testid="input-xnrt-reward"
-                />
-              </div>
-            </div>
-            <div>
-              <Label htmlFor="category">Category</Label>
-              <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                <SelectTrigger data-testid="select-category">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="special">Special</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="requirements">Requirements (optional)</Label>
-              <Input
-                id="requirements"
-                value={formData.requirements}
-                onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
-                placeholder="e.g., Minimum stake amount: 1000 XNRT"
-                data-testid="input-requirements"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setCreateDialogOpen(false);
-              setEditDialogOpen(false);
-            }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (editDialogOpen && selectedTask) {
-                  updateMutation.mutate({ id: selectedTask.id, data: formData });
-                } else {
-                  createMutation.mutate(formData);
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Daily tasks */}
+      {!isLoading && dailyTasks.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-chart-1" />
+              Daily Tasks
+            </CardTitle>
+            <CardDescription>
+              Complete daily to maintain your streak
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {dailyTasks.map((userTask) => (
+              <TaskItem
+                key={userTask.id}
+                userTask={userTask}
+                onComplete={() =>
+                  completeTaskMutation.mutate(userTask.taskId as string)
                 }
-              }}
-              disabled={createMutation.isPending || updateMutation.isPending || !formData.title || !formData.description}
-              data-testid="button-submit"
-            >
-              {editDialogOpen ? "Update Task" : "Create Task"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                isPending={completeTaskMutation.isPending}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Task</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete "{selectedTask?.title}"?
-              This will also remove all user progress for this task. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => selectedTask && deleteMutation.mutate(selectedTask.id)}
-              className="bg-destructive hover:bg-destructive/90"
-              data-testid="button-confirm-delete"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Weekly tasks */}
+      {!isLoading && weeklyTasks.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Star className="h-5 w-5 text-chart-2" />
+              Weekly Tasks
+            </CardTitle>
+            <CardDescription>
+              Higher rewards for weekly completion
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {weeklyTasks.map((userTask) => (
+              <TaskItem
+                key={userTask.id}
+                userTask={userTask}
+                onComplete={() =>
+                  completeTaskMutation.mutate(userTask.taskId as string)
+                }
+                isPending={completeTaskMutation.isPending}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Special tasks */}
+      {!isLoading && specialTasks.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-chart-5" />
+              Special Tasks
+            </CardTitle>
+            <CardDescription>
+              Limited time tasks with bonus rewards
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {specialTasks.map((userTask) => (
+              <TaskItem
+                key={userTask.id}
+                userTask={userTask}
+                onComplete={() =>
+                  completeTaskMutation.mutate(userTask.taskId as string)
+                }
+                isPending={completeTaskMutation.isPending}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && (!userTasks || userTasks.length === 0) && (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <ListChecks className="mx-auto mb-4 h-16 w-16 text-muted-foreground" />
+            <p className="text-lg text-muted-foreground">No tasks available</p>
+            <p className="text-sm text-muted-foreground">
+              Check back later for new tasks
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function renderDescriptionWithLink(description: string) {
+  if (!description) return null;
+
+  const match = description.match(/https?:\/\/\S+/);
+  if (!match) return <span>{description}</span>;
+
+  const url = match[0];
+  const [before, after] = description.split(url);
+  const display =
+    url.length > 45 ? `${url.slice(0, 42)}…` : url;
+
+  return (
+    <>
+      {before}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-primary underline-offset-2 hover:underline"
+      >
+        {display}
+      </a>
+      {after}
+    </>
+  );
+}
+
+function TaskItem({
+  userTask,
+  onComplete,
+  isPending,
+}: {
+  userTask: UserTaskWithTask;
+  onComplete: () => void;
+  isPending: boolean;
+}) {
+  const { task } = userTask;
+
+  const progress =
+    userTask.maxProgress > 0
+      ? (userTask.progress / userTask.maxProgress) * 100
+      : 0;
+
+  const CategoryIcon =
+    task.category === "daily"
+      ? Calendar
+      : task.category === "weekly"
+      ? Star
+      : Sparkles;
+
+  const xnrtRewardNumber =
+    typeof task.xnrtReward === "number"
+      ? task.xnrtReward
+      : parseFloat(task.xnrtReward || "0");
+
+  return (
+    <div
+      className="flex flex-col gap-4 rounded-xl border border-border bg-card/40 p-4 hover-elevate md:flex-row md:items-center md:justify-between"
+      data-testid={`task-${userTask.id}`}
+    >
+      {/* Left: icon + text */}
+      <div className="flex flex-1 items-start gap-4">
+        <div
+          className={`flex h-12 w-12 items-center justify-center rounded-full ${
+            userTask.completed ? "bg-chart-2/20" : "bg-muted"
+          }`}
+        >
+          {userTask.completed ? (
+            <CheckCircle2 className="h-6 w-6 text-chart-2" />
+          ) : (
+            <CategoryIcon className="h-6 w-6 text-muted-foreground" />
+          )}
+        </div>
+
+        <div className="flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold leading-tight">{task.title}</p>
+            <Badge variant="secondary" className="capitalize">
+              {task.category}
+            </Badge>
+          </div>
+
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {renderDescriptionWithLink(task.description)}
+          </p>
+
+          {!userTask.completed && userTask.maxProgress > 1 && (
+            <div className="space-y-1 pt-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Progress</span>
+                <span className="font-semibold">
+                  {userTask.progress}/{userTask.maxProgress}
+                </span>
+              </div>
+              <Progress value={progress} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right: rewards + button */}
+      <div className="flex flex-col items-end gap-2 md:items-end">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Badge variant="outline" className="bg-chart-1/10">
+            +{task.xpReward} XP
+          </Badge>
+          {xnrtRewardNumber > 0 && (
+            <Badge variant="outline" className="bg-chart-2/10">
+              +{xnrtRewardNumber.toLocaleString()} XNRT
+            </Badge>
+          )}
+        </div>
+
+        {userTask.completed ? (
+          <Badge variant="default" className="bg-chart-2">
+            Completed
+          </Badge>
+        ) : (
+          <Button
+            size="sm"
+            disabled={userTask.progress < userTask.maxProgress || isPending}
+            onClick={onComplete}
+            data-testid={`button-complete-${userTask.id}`}
+            aria-label={`Complete task ${task.title}`}
+          >
+            Complete
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,12 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+// client/src/components/chat-bot.tsx
+import {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  type KeyboardEvent,
+  type CSSProperties,
+} from "react";
 import { MessageCircle, X, Send, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,16 +27,66 @@ interface FAQItem {
 }
 
 const faqDatabase: FAQItem[] = [
-  { keywords: ["staking", "stake", "apy", "interest", "earn", "passive"], answer: "XNRT offers 4 staking tiers with APY ranging from 30% to 730%! You can stake your XNRT tokens for different durations (30, 90, 180, or 365 days) and earn daily rewards automatically. Visit the Staking page to get started!", category: "staking" },
-  { keywords: ["mining", "mine", "xp", "session", "24 hours"], answer: "Mining sessions run for 24 hours and reward you with 10 XP + 5 XNRT per session! Sessions complete automatically and there's no cooldown - you can start a new session immediately after one ends.", category: "mining" },
-  { keywords: ["referral", "refer", "commission", "invite", "share", "link"], answer: "Our 3-level referral system rewards you with: 6% from Level 1, 3% from Level 2, and 1% from Level 3! Share your referral link to build your network and earn passive commissions from your downline's earnings.", category: "referrals" },
-  { keywords: ["deposit", "add funds", "usdt", "balance", "top up"], answer: "To deposit, go to the Wallet page and click 'Deposit USDT'. Upload your proof of payment and wait for admin approval. USDT is converted to XNRT at a 1:1 ratio.", category: "deposits" },
-  { keywords: ["withdraw", "withdrawal", "cash out", "send", "transfer"], answer: "Withdrawals have a 2% fee and require admin approval. Go to Wallet > Withdraw, enter the amount and your wallet address. Your XNRT will be converted to USDT and sent once approved.", category: "withdrawals" },
-  { keywords: ["task", "daily", "check-in", "checkin", "streak", "reward"], answer: "Complete daily check-ins to earn streak rewards! The longer your streak, the bigger the rewards. You'll also unlock achievements as you progress!", category: "tasks" },
-  { keywords: ["account", "register", "sign up", "login", "password", "forgot"], answer: "You can register with email/password or use your Replit account. If you forgot your password, click 'Forgot Password?' on the login page to reset it via email.", category: "account" },
-  { keywords: ["balance", "wallet", "tokens", "xnrt amount", "how much"], answer: "Check your XNRT balance anytime in the Wallet section. Your balance includes tokens from staking, mining, referrals, and daily rewards!", category: "wallet" },
-  { keywords: ["help", "support", "contact", "email", "assistance"], answer: "Need personalized help? Email our support team at support@xnrt.org - we're here 24/7 to assist you!", category: "support" },
-  { keywords: ["hello", "hi", "hey", "greetings", "start"], answer: "Hello! 👋 I'm your XNRT support assistant. I can help you with questions about staking, mining, referrals, deposits, withdrawals, and more. What would you like to know?", category: "greeting" }
+  {
+    keywords: ["staking", "stake", "apy", "interest", "earn", "passive"],
+    answer:
+      "XNRT offers multiple staking tiers with high APY. You can stake your XNRT tokens for different durations and earn daily rewards automatically. Visit the Staking page to get started!",
+    category: "staking",
+  },
+  {
+    keywords: ["mining", "mine", "xp", "session", "24 hours"],
+    answer:
+      "Mining sessions run for 24 hours and reward you with XP and XNRT. Sessions complete automatically and you can start a new session immediately after one ends.",
+    category: "mining",
+  },
+  {
+    keywords: ["referral", "refer", "commission", "invite", "share", "link"],
+    answer:
+      "Our 3-level referral system rewards you from your network’s earnings. Share your referral link to build your team and earn passive commissions.",
+    category: "referrals",
+  },
+  {
+    keywords: ["deposit", "add funds", "usdt", "balance", "top up"],
+    answer:
+      "To deposit, go to the Wallet page and click “Deposit USDT”. Once your transaction is verified and approved, your USDT is converted to XNRT at the current platform rate.",
+    category: "deposits",
+  },
+  {
+    keywords: ["withdraw", "withdrawal", "cash out", "send", "transfer"],
+    answer:
+      "Withdrawals have a 2% fee and require admin approval. Go to Wallet → Withdraw, enter the amount and your wallet address. Your XNRT will be converted to USDT and sent once approved.",
+    category: "withdrawals",
+  },
+  {
+    keywords: ["task", "daily", "check-in", "checkin", "streak", "reward"],
+    answer:
+      "Complete daily check-ins and tasks to earn streak rewards and XP. The longer your streak, the bigger the rewards, and you can unlock achievements as you progress.",
+    category: "tasks",
+  },
+  {
+    keywords: ["account", "register", "sign up", "login", "password", "forgot"],
+    answer:
+      "You can register with your email and password. If you forgot your password, click “Forgot Password?” on the login page to reset it via email.",
+    category: "account",
+  },
+  {
+    keywords: ["balance", "wallet", "tokens", "xnrt amount", "how much"],
+    answer:
+      "Check your XNRT balance anytime in the Wallet section. Your balance includes tokens from staking, mining, referrals, and daily rewards.",
+    category: "wallet",
+  },
+  {
+    keywords: ["help", "support", "contact", "email", "assistance"],
+    answer:
+      "Need personalized help? Email our support team at support@xnrt.org — we’re here to assist you.",
+    category: "support",
+  },
+  {
+    keywords: ["hello", "hi", "hey", "greetings", "start"],
+    answer:
+      "Hello! 👋 I’m your XNRT support assistant. I can help you with questions about staking, mining, referrals, deposits, withdrawals, and more. What would you like to know?",
+    category: "greeting",
+  },
 ];
 
 function findBestMatch(userMessage: string): FAQItem | null {
@@ -59,11 +117,16 @@ interface ChatBotProps {
   showLauncher?: boolean;
 }
 
-export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher = true }: ChatBotProps = {}) {
+export function ChatBot({
+  isOpen: controlledIsOpen,
+  onOpenChange,
+  showLauncher = true,
+}: ChatBotProps = {}) {
   const [internalIsOpen, setInternalIsOpen] = useState(false);
-  
+
   // Use controlled state if provided, otherwise use internal state
-  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
+  const isOpen =
+    controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
   const setIsOpen = (open: boolean) => {
     if (onOpenChange) {
       onOpenChange(open);
@@ -71,29 +134,37 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
       setInternalIsOpen(open);
     }
   };
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       text: "Hi! I'm your XNRT support assistant. Ask me about staking, mining, referrals, or anything else!",
       sender: "bot",
-      timestamp: new Date()
-    }
+      timestamp: new Date(),
+    },
   ]);
   const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // --- Mobile keyboard/viewport offset (VisualViewport) ---
   const [kbOffset, setKbOffset] = useState(0);
   useEffect(() => {
+    if (typeof window === "undefined") return;
     const vv = (window as any).visualViewport as VisualViewport | undefined;
     if (!vv) return;
+
     const handler = () => {
-      const pushed = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const pushed = Math.max(
+        0,
+        window.innerHeight - vv.height - vv.offsetTop
+      );
       setKbOffset(pushed);
     };
+
     vv.addEventListener("resize", handler);
     vv.addEventListener("scroll", handler);
     handler();
+
     return () => {
       vv.removeEventListener("resize", handler);
       vv.removeEventListener("scroll", handler);
@@ -120,14 +191,16 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
   const handleSend = (messageOverride?: string) => {
     const messageText = messageOverride || input;
     if (!messageText.trim()) return;
+
     const userMessage: Message = {
       id: Date.now().toString(),
       text: messageText,
       sender: "user",
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
+
     setTimeout(() => {
       const match = findBestMatch(messageText);
       const botResponse: Message = {
@@ -136,13 +209,13 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
           ? match.answer
           : "I'm not sure about that. Please email our support team at support@xnrt.org for personalized assistance!",
         sender: "bot",
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-      setMessages(prev => [...prev, botResponse]);
+      setMessages((prev) => [...prev, botResponse]);
     }, 500);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -150,15 +223,21 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
   };
 
   // Styles that respect safe-area and keyboard lift
-  const launcherStyle = useMemo<React.CSSProperties>(() => ({
-    right: "clamp(12px, 3vw, 18px)",
-    bottom: `calc(16px + env(safe-area-inset-bottom, 0px) + ${kbOffset}px)`
-  }), [kbOffset]);
+  const launcherStyle = useMemo<CSSProperties>(
+    () => ({
+      right: "clamp(12px, 3vw, 18px)",
+      bottom: `calc(16px + env(safe-area-inset-bottom, 0px) + ${kbOffset}px)`,
+    }),
+    [kbOffset]
+  );
 
-  const sheetStyle = useMemo<React.CSSProperties>(() => ({
-    // make sure the sheet sits above home indicator / keyboard
-    paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${kbOffset}px)`
-  }), [kbOffset]);
+  const sheetStyle = useMemo<CSSProperties>(
+    () => ({
+      // make sure the sheet sits above home indicator / keyboard
+      paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${kbOffset}px)`,
+    }),
+    [kbOffset]
+  );
 
   // Chat inner UI (shared between desktop card & mobile sheet)
   const ChatContent = (
@@ -187,7 +266,10 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
           {messages.map((msg) => (
             <div
               key={msg.id}
-              className={cn("flex", msg.sender === "user" ? "justify-end" : "justify-start")}
+              className={cn(
+                "flex",
+                msg.sender === "user" ? "justify-end" : "justify-start"
+              )}
             >
               <div
                 className={cn(
@@ -229,7 +311,7 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyPress}
             placeholder="Ask me anything..."
             className="flex-1 border-amber-500/30 bg-white/5 text-white placeholder:text-white/40 focus-visible:border-amber-500 focus-visible:ring-amber-500/20"
             data-testid="input-chat-message"
@@ -262,7 +344,7 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
 
   return (
     <>
-      {/* Floating Chat Button (bottom-right, safe-area + keyboard aware) - only show if showLauncher is true */}
+      {/* Floating Chat Button */}
       {!isOpen && showLauncher && (
         <Button
           onClick={() => setIsOpen(true)}
@@ -275,7 +357,7 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
         </Button>
       )}
 
-      {/* When open: dimmer/backdrop */}
+      {/* Backdrop */}
       {isOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:bg-black/30"
@@ -284,7 +366,7 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
         />
       )}
 
-      {/* Mobile bottom-sheet (<= md) */}
+      {/* Mobile bottom-sheet */}
       {isOpen && (
         <div
           role="dialog"
@@ -293,7 +375,6 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
           style={sheetStyle}
           data-testid="container-chat-window-mobile"
         >
-          {/* drag handle + close (header duplicated for mobile top chrome) */}
           <div className="relative flex items-center justify-center pt-2 pb-1">
             <div className="h-1.5 w-10 rounded-full bg-white/20" />
             <button
@@ -305,11 +386,13 @@ export function ChatBot({ isOpen: controlledIsOpen, onOpenChange, showLauncher =
               <X className="h-5 w-5 text-white/70" />
             </button>
           </div>
-          <div className="flex-1 flex flex-col overflow-hidden">{ChatContent}</div>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {ChatContent}
+          </div>
         </div>
       )}
 
-      {/* Desktop anchored card (>= md) — matches your original look */}
+      {/* Desktop card */}
       {isOpen && (
         <div
           role="dialog"
