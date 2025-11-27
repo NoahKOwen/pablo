@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 
 const provider = new ethers.JsonRpcProvider(process.env.RPC_BSC_URL);
+
 const USDT_ABI = [
   "event Transfer(address indexed from, address indexed to, uint256 value)",
 ];
@@ -24,39 +25,40 @@ export async function verifyBscUsdtDeposit(params: {
   minAmount?: number;
   requiredConf?: number;
 }): Promise<VerifyResult> {
+  const { txHash, expectedTo } = params;
+
+  // ---------- TEST/DEV OVERRIDE ----------
+  // Enable by env: ALLOW_VERIFY_OVERRIDE=1
+  // Optional: VERIFY_OVERRIDE_PREFIX="test:" => only override if txHash startsWith("test:")
+  // NOTE: In prod keep ALLOW_VERIFY_OVERRIDE unset/0.
+  const allowOverride =
+    process.env.ALLOW_VERIFY_OVERRIDE === "1" &&
+    (process.env.NODE_ENV !== "production" ||
+      process.env.FORCE_OVERRIDE_IN_PROD === "1");
+
+  const prefix = (process.env.VERIFY_OVERRIDE_PREFIX || "").toLowerCase();
+  const matchPrefix = prefix
+    ? txHash?.toLowerCase().startsWith(prefix)
+    : true;
+
+  // Also allow sentinel: requiredConf === -1 to force override from caller (optional)
+  const forceByParam = params.requiredConf === -1;
+
+  if (allowOverride && (matchPrefix || forceByParam)) {
+    const fakeConf = Number(process.env.OVERRIDE_CONFIRMATIONS ?? 12);
+    const amt =
+      typeof params.minAmount === "number" ? params.minAmount : undefined;
+
+    return {
+      verified: true,
+      confirmations: fakeConf,
+      amountOnChain: amt,
+      reason: "override",
+    };
+  }
+  // ---------------------------------------
+
   try {
-    const { txHash, expectedTo } = params;
-
-    // ---------- TEST/DEV OVERRIDE (minimal change) ----------
-    // Enable by env: ALLOW_VERIFY_OVERRIDE=1
-    // Optional: VERIFY_OVERRIDE_PREFIX="test:" => only override if txHash startsWith("test:")
-    // NOTE: In prod keep ALLOW_VERIFY_OVERRIDE unset/0.
-    const allowOverride =
-      process.env.ALLOW_VERIFY_OVERRIDE === "1" &&
-      (process.env.NODE_ENV !== "production" ||
-        process.env.FORCE_OVERRIDE_IN_PROD === "1");
-
-    const prefix = (process.env.VERIFY_OVERRIDE_PREFIX || "").toLowerCase();
-    const matchPrefix = prefix
-      ? txHash?.toLowerCase().startsWith(prefix)
-      : true;
-
-    // Also allow sentinel: requiredConf === -1 to force override from caller (optional)
-    const forceByParam = params.requiredConf === -1;
-
-    if (allowOverride && (matchPrefix || forceByParam)) {
-      const fakeConf = Number(process.env.OVERRIDE_CONFIRMATIONS ?? 12);
-      const amt =
-        typeof params.minAmount === "number" ? params.minAmount : undefined;
-      return {
-        verified: true,
-        confirmations: fakeConf,
-        amountOnChain: amt,
-        reason: "override",
-      };
-    }
-    // --------------------------------------------------------
-
     const need =
       params.requiredConf ?? Number(process.env.BSC_CONFIRMATIONS ?? 12);
 
@@ -70,8 +72,9 @@ export async function verifyBscUsdtDeposit(params: {
     }
 
     if (receipt.status !== 1) {
-      const conf =
-        (await provider.getBlockNumber()) - (receipt.blockNumber ?? 0);
+      const currentBlock = await provider.getBlockNumber();
+      const conf = currentBlock - (receipt.blockNumber ?? 0);
+
       return {
         verified: false,
         confirmations: conf,
@@ -85,25 +88,32 @@ export async function verifyBscUsdtDeposit(params: {
       if (
         log.address.toLowerCase() !==
         process.env.USDT_BSC_ADDRESS!.toLowerCase()
-      )
+      ) {
         continue;
+      }
+
       try {
         const parsed = usdt.interface.parseLog({
           topics: log.topics,
           data: log.data,
         });
+
         if (parsed?.name !== "Transfer") continue;
+
         const to: string = (parsed.args as any).to;
         const value: bigint = (parsed.args as any).value;
+
         if (to.toLowerCase() === expectedTo.toLowerCase()) {
           totalToExpected += value;
         }
       } catch {
-        // ignore non-transfer logs
+        // Ignore non-transfer / unparsable logs
       }
     }
 
-    const conf = (await provider.getBlockNumber()) - (receipt.blockNumber ?? 0);
+    const currentBlock = await provider.getBlockNumber();
+    const conf = currentBlock - (receipt.blockNumber ?? 0);
+
     if (totalToExpected === BigInt(0)) {
       return {
         verified: false,
@@ -114,6 +124,7 @@ export async function verifyBscUsdtDeposit(params: {
 
     // USDT (BSC) has 18 decimals
     const amountFloat = Number(ethers.formatUnits(totalToExpected, 18));
+
     if (
       typeof params.minAmount === "number" &&
       amountFloat + 1e-10 < params.minAmount
@@ -134,7 +145,11 @@ export async function verifyBscUsdtDeposit(params: {
       };
     }
 
-    return { verified: true, confirmations: conf, amountOnChain: amountFloat };
+    return {
+      verified: true,
+      confirmations: conf,
+      amountOnChain: amountFloat,
+    };
   } catch (e: any) {
     return {
       verified: false,

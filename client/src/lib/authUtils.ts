@@ -1,6 +1,3 @@
-// Referenced from Replit Auth blueprint
-// Enhanced with robust status/code checking instead of fragile regex
-
 export type ApiError = Error & {
   status?: number;
   code?: string;

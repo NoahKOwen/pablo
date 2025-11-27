@@ -26,14 +26,22 @@ import {
   QrCode,
 } from "lucide-react";
 import type { Transaction } from "@shared/schema";
-import { isUnauthorizedError } from "@/lib/authUtils";
+import { isUnauthorizedError, handleUnauthorized } from "@/lib/authUtils";
 import { LinkWalletCard } from "@/components/link-wallet-card";
 import { ReportMissingDeposit } from "@/components/report-missing-deposit";
 import QRCode from "qrcode";
+import { nf } from "@/lib/number";
 
 const COMPANY_WALLET = "0x715C32deC9534d2fB34e0B567288AF8d895efB59";
 const USDT_TO_XNRT_RATE = 100;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+type DepositAddressResponse = {
+  address: string;
+  network?: string;
+  token?: string;
+  instructions?: string[];
+};
 
 export default function Deposit() {
   const { toast } = useToast();
@@ -48,9 +56,9 @@ export default function Deposit() {
     queryKey: ["/api/transactions/deposits"],
   });
 
-  const { data: depositAddress, isLoading: isLoadingAddress } = useQuery<{
-    address: string;
-  }>({
+  const { data: depositAddress, isLoading: isLoadingAddress } = useQuery<
+    DepositAddressResponse
+  >({
     queryKey: ["/api/wallet/deposit-address"],
   });
 
@@ -70,20 +78,25 @@ export default function Deposit() {
     }
   }, [depositAddress?.address]);
 
+  // Manual deposit submission → /api/wallet/report-deposit
   const depositMutation = useMutation({
     mutationFn: async (data: {
-      usdtAmount: string;
-      transactionHash: string;
+      amount: string;
+      transactionHash?: string;
+      description?: string;
       proofImageUrl?: string;
     }) => {
-      return await apiRequest("POST", "/api/transactions/deposit", data);
+      return await apiRequest("POST", "/api/wallet/report-deposit", data);
     },
     onSuccess: () => {
       toast({
-        title: "Deposit Submitted!",
-        description: "Your deposit is pending admin approval",
+        title: "Deposit Report Submitted",
+        description:
+          "Your deposit report has been submitted. We'll review and credit it if valid.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/transactions/deposits"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/transactions/deposits"],
+      });
       setUsdtAmount("");
       setTransactionHash("");
       setProofImageUrl("");
@@ -91,14 +104,7 @@ export default function Deposit() {
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/api/login";
-        }, 500);
+        handleUnauthorized(toast);
         return;
       }
       toast({
@@ -110,11 +116,30 @@ export default function Deposit() {
   });
 
   const copyWallet = (address: string) => {
-    navigator.clipboard.writeText(address);
-    toast({
-      title: "Copied!",
-      description: "Wallet address copied to clipboard",
-    });
+    if (!navigator.clipboard) {
+      toast({
+        title: "Copy Failed",
+        description: "Clipboard not available. Please copy manually.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    navigator.clipboard
+      .writeText(address)
+      .then(() => {
+        toast({
+          title: "Copied!",
+          description: "Wallet address copied to clipboard",
+        });
+      })
+      .catch(() => {
+        toast({
+          title: "Copy Failed",
+          description: "Unable to copy to clipboard. Please copy manually.",
+          variant: "destructive",
+        });
+      });
   };
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -168,16 +193,18 @@ export default function Deposit() {
   };
 
   const handleSubmit = () => {
-    if (!usdtAmount || !transactionHash) {
+    if (!usdtAmount) {
       toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields",
+        title: "Missing Amount",
+        description: "Please enter the USDT amount you deposited",
         variant: "destructive",
       });
       return;
     }
 
-    if (parseFloat(usdtAmount) <= 0) {
+    const amount = parseFloat(usdtAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
       toast({
         title: "Invalid Amount",
         description: "Please enter a valid USDT amount",
@@ -186,14 +213,21 @@ export default function Deposit() {
       return;
     }
 
+    const trimmedHash = transactionHash.trim();
+
     depositMutation.mutate({
-      usdtAmount,
-      transactionHash,
+      amount: usdtAmount,
+      ...(trimmedHash && { transactionHash: trimmedHash }), // optional
+      description: "Manual deposit report from Deposit page",
       ...(proofImageUrl && { proofImageUrl }),
     });
   };
 
-  const xnrtAmount = usdtAmount ? parseFloat(usdtAmount) * USDT_TO_XNRT_RATE : 0;
+  const parsedAmount = parseFloat(usdtAmount || "0");
+  const xnrtAmount =
+    !Number.isNaN(parsedAmount) && parsedAmount > 0
+      ? parsedAmount * USDT_TO_XNRT_RATE
+      : 0;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -221,6 +255,13 @@ export default function Deposit() {
     }
   };
 
+  const sortedDeposits: Transaction[] =
+    deposits?.slice().sort((a: Transaction, b: Transaction) => {
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return db - da; // newest first
+    }) ?? [];
+
   return (
     <div className="space-y-6">
       <div>
@@ -233,6 +274,7 @@ export default function Deposit() {
       <LinkWalletCard />
 
       <div className="grid gap-6 md:grid-cols-2">
+        {/* LEFT: Instructions + personal deposit address */}
         <Card className="border-primary/20">
           <CardHeader>
             <CardTitle>Deposit Instructions</CardTitle>
@@ -319,7 +361,7 @@ export default function Deposit() {
                     <Button
                       size="icon"
                       variant="outline"
-                      onClick={() => setShowQR(!showQR)}
+                      onClick={() => setShowQR((prev) => !prev)}
                       data-testid="button-toggle-qr"
                     >
                       <QrCode className="h-4 w-4" />
@@ -338,7 +380,12 @@ export default function Deposit() {
                   )}
 
                   <p className="text-xs text-muted-foreground">
-                    Network: BEP20 (Binance Smart Chain)
+                    Network:{" "}
+                    {depositAddress.network ||
+                      "BEP20 (Binance Smart Chain)"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Token: {depositAddress.token || "USDT"}
                   </p>
                   <p className="text-xs font-medium text-primary">
                     ⚡ This address is unique to you - deposits are
@@ -354,6 +401,7 @@ export default function Deposit() {
           </CardContent>
         </Card>
 
+        {/* RIGHT: Manual / troubleshooting submission */}
         <Card className="border-primary/20 bg-gradient-to-br from-card to-primary/5">
           <CardHeader>
             <CardTitle>Manual Deposit Submission</CardTitle>
@@ -391,7 +439,7 @@ export default function Deposit() {
               </div>
             </div>
 
-            {/* existing fields */}
+            {/* USDT amount */}
             <div>
               <Label htmlFor="usdtAmount">USDT Amount</Label>
               <Input
@@ -402,9 +450,12 @@ export default function Deposit() {
                 onChange={(e) => setUsdtAmount(e.target.value)}
                 data-testid="input-usdt-amount"
               />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Rate: 1 USDT = {USDT_TO_XNRT_RATE.toLocaleString()} XNRT
+              </p>
             </div>
 
-            {usdtAmount && parseFloat(usdtAmount) > 0 && (
+            {xnrtAmount > 0 && (
               <div className="rounded-md bg-muted/50 p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">
@@ -414,17 +465,18 @@ export default function Deposit() {
                     className="text-2xl font-bold text-primary"
                     data-testid="text-xnrt-amount"
                   >
-                    {xnrtAmount.toLocaleString()} XNRT
+                    {nf(xnrtAmount)} XNRT
                   </span>
                 </div>
               </div>
             )}
 
+            {/* Tx hash (optional) */}
             <div>
-              <Label htmlFor="txHash">Transaction Hash</Label>
+              <Label htmlFor="txHash">Transaction Hash (Optional)</Label>
               <Textarea
                 id="txHash"
-                placeholder="Paste transaction hash from your wallet"
+                placeholder="Paste transaction hash from your wallet (optional)"
                 value={transactionHash}
                 onChange={(e) => setTransactionHash(e.target.value)}
                 className="font-mono text-sm"
@@ -432,6 +484,7 @@ export default function Deposit() {
               />
             </div>
 
+            {/* Proof screenshot */}
             <div>
               <Label htmlFor="proofImage">Proof of Payment (Optional)</Label>
               <div className="space-y-3">
@@ -503,7 +556,9 @@ export default function Deposit() {
               className="w-full"
               size="lg"
               disabled={
-                !usdtAmount || !transactionHash || depositMutation.isPending
+                depositMutation.isPending ||
+                Number.isNaN(parsedAmount) ||
+                parsedAmount <= 0
               }
               onClick={handleSubmit}
               data-testid="button-submit-deposit"
@@ -519,61 +574,70 @@ export default function Deposit() {
         </Card>
       </div>
 
+      {/* Deposit history */}
       <Card>
         <CardHeader>
           <CardTitle>Deposit History</CardTitle>
           <CardDescription>Your deposit transactions</CardDescription>
         </CardHeader>
         <CardContent>
-          {!deposits || deposits.length === 0 ? (
+          {sortedDeposits.length === 0 ? (
             <div className="py-12 text-center">
               <ArrowDownToLine className="mx-auto mb-4 h-16 w-16 text-muted-foreground" />
               <p className="text-muted-foreground">No deposits yet</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {deposits.map((deposit) => (
-                <div
-                  key={deposit.id}
-                  className="hover-elevate flex items-center justify-between rounded-md border border-border p-4"
-                  data-testid={`deposit-${deposit.id}`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-md bg-primary/20">
-                      <ArrowDownToLine className="h-6 w-6 text-primary" />
+              {sortedDeposits.map((deposit) => {
+                const usdt = parseFloat(deposit.usdtAmount || "0");
+                const xnrt = parseFloat(deposit.amount || "0");
+
+                return (
+                  <div
+                    key={deposit.id}
+                    className="hover-elevate flex items-center justify-between rounded-md border border-border p-4"
+                    data-testid={`deposit-${deposit.id}`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-md bg-primary/20">
+                        <ArrowDownToLine className="h-6 w-6 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">
+                          {usdt.toLocaleString()} USDT →{" "}
+                          {xnrt.toLocaleString()} XNRT
+                        </p>
+                        <p className="font-mono text-sm text-muted-foreground">
+                          {deposit.transactionHash
+                            ? `${deposit.transactionHash.substring(0, 16)}...`
+                            : "No hash"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {deposit.createdAt
+                            ? new Date(deposit.createdAt).toLocaleString()
+                            : "N/A"}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-semibold">
-                        {parseFloat(deposit.usdtAmount || "0").toLocaleString()}{" "}
-                        USDT →{" "}
-                        {parseFloat(deposit.amount).toLocaleString()} XNRT
-                      </p>
-                      <p className="font-mono text-sm text-muted-foreground">
-                        {deposit.transactionHash?.substring(0, 16)}...
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {deposit.createdAt
-                          ? new Date(deposit.createdAt).toLocaleString()
-                          : "N/A"}
-                      </p>
+                    <div className="space-y-2 text-right">
+                      <Badge
+                        className={getStatusColor(deposit.status)}
+                        variant="outline"
+                      >
+                        {getStatusIcon(deposit.status)}
+                        <span className="ml-2 capitalize">
+                          {deposit.status}
+                        </span>
+                      </Badge>
+                      {deposit.adminNotes && deposit.status === "rejected" && (
+                        <p className="text-xs text-destructive">
+                          {deposit.adminNotes}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <div className="space-y-2 text-right">
-                    <Badge
-                      className={getStatusColor(deposit.status)}
-                      variant="outline"
-                    >
-                      {getStatusIcon(deposit.status)}
-                      <span className="ml-2">{deposit.status}</span>
-                    </Badge>
-                    {deposit.adminNotes && deposit.status === "rejected" && (
-                      <p className="text-xs text-destructive">
-                        {deposit.adminNotes}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

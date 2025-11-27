@@ -1,3 +1,4 @@
+// server/services/depositScanner.ts
 import { ethers } from "ethers";
 import { PrismaClient, Prisma } from "@prisma/client";
 
@@ -28,11 +29,29 @@ export async function startDepositScanner() {
     return;
   }
 
+  if (!RPC_URL) {
+    console.error(
+      "[DepositScanner] RPC_BSC_URL is not set. Scanner disabled."
+    );
+    return;
+  }
+
+  if (!USDT_ADDRESS) {
+    console.error(
+      "[DepositScanner] USDT_BSC_ADDRESS is not set. Scanner disabled."
+    );
+    return;
+  }
+
   const scanInterval = 60 * 1000; // 1 minute
 
   console.log("[DepositScanner] Starting scanner service...");
-  console.log(`[DepositScanner] Treasury (legacy): ${TREASURY_ADDRESS}`);
-  console.log(`[DepositScanner] USDT: ${USDT_ADDRESS}`);
+  console.log(
+    `[DepositScanner] Treasury / manual deposit address: ${
+      TREASURY_ADDRESS || "(not configured)"
+    }`
+  );
+  console.log(`[DepositScanner] USDT token: ${USDT_ADDRESS}`);
   console.log(
     `[DepositScanner] Required confirmations: ${REQUIRED_CONFIRMATIONS}`
   );
@@ -172,8 +191,8 @@ async function processDepositEvent(
     const userId = addressToUserId.get(to);
 
     if (!userId) {
-      // Not sent to a user deposit address, check if it's to treasury (legacy)
-      if (to === TREASURY_ADDRESS) {
+      // Not sent to a user deposit address, check if it's to treasury (legacy/manual)
+      if (TREASURY_ADDRESS && to === TREASURY_ADDRESS) {
         // Legacy treasury deposit - check for linked wallet
         const linkedWallet = await prisma.linkedWallet.findFirst({
           where: { address: from, active: true },
@@ -238,68 +257,29 @@ async function processUserDeposit(
   confirmations: number
 ) {
   try {
+    // Make sure we only ever credit once tx has enough confirmations.
+    if (confirmations < REQUIRED_CONFIRMATIONS) {
+      console.log(
+        `[DepositScanner] Tx ${txHash} only has ${confirmations}/${REQUIRED_CONFIRMATIONS} confirmations, waiting for more`
+      );
+      return;
+    }
+
     // Calculate XNRT amount
     const netUsdt = usdtAmount * (1 - PLATFORM_FEE_BPS / 10_000);
     const xnrtAmount = netUsdt * XNRT_RATE;
 
-    if (confirmations >= REQUIRED_CONFIRMATIONS) {
-      // Enough confirmations - auto-credit
-      await prisma.$transaction(async (tx) => {
-        // Create approved transaction
-        await tx.transaction.create({
-          data: {
-            userId,
-            type: "deposit",
-            amount: new Prisma.Decimal(xnrtAmount),
-            usdtAmount: new Prisma.Decimal(usdtAmount),
-            transactionHash: txHash,
-            walletAddress: toAddress, // User's deposit address
-            status: "approved",
-            verified: true,
-            confirmations,
-            verificationData: {
-              autoDeposit: true,
-              blockNumber,
-              scannedAt: new Date().toISOString(),
-              fromAddress,
-            } as any,
-          },
-        });
-
-        // Credit balance atomically
-        await tx.balance.upsert({
-          where: { userId },
-          create: {
-            userId,
-            xnrtBalance: new Prisma.Decimal(xnrtAmount),
-            totalEarned: new Prisma.Decimal(xnrtAmount),
-          },
-          update: {
-            xnrtBalance: { increment: new Prisma.Decimal(xnrtAmount) },
-            totalEarned: { increment: new Prisma.Decimal(xnrtAmount) },
-          },
-        });
-      });
-
-      console.log(
-        `[DepositScanner] Auto-credited ${xnrtAmount} XNRT to user ${userId}`
-      );
-
-      // Send notification (non-blocking)
-      void sendDepositNotification(userId, xnrtAmount, txHash).catch((err) => {
-        console.error("[DepositScanner] Notification error:", err);
-      });
-    } else {
-      // Not enough confirmations - create pending transaction
-      await prisma.transaction.create({
+    await prisma.$transaction(async (tx) => {
+      // Create approved transaction
+      await tx.transaction.create({
         data: {
           userId,
           type: "deposit",
           amount: new Prisma.Decimal(xnrtAmount),
           usdtAmount: new Prisma.Decimal(usdtAmount),
           transactionHash: txHash,
-          walletAddress: toAddress, // User's deposit address
-          status: "pending",
+          walletAddress: toAddress, // User's deposit address or treasury
+          status: "approved",
           verified: true,
           confirmations,
           verificationData: {
@@ -311,10 +291,29 @@ async function processUserDeposit(
         },
       });
 
-      console.log(
-        `[DepositScanner] Pending deposit (${confirmations}/${REQUIRED_CONFIRMATIONS} confirmations)`
-      );
-    }
+      // Credit balance atomically
+      await tx.balance.upsert({
+        where: { userId },
+        create: {
+          userId,
+          xnrtBalance: new Prisma.Decimal(xnrtAmount),
+          totalEarned: new Prisma.Decimal(xnrtAmount),
+        },
+        update: {
+          xnrtBalance: { increment: new Prisma.Decimal(xnrtAmount) },
+          totalEarned: { increment: new Prisma.Decimal(xnrtAmount) },
+        },
+      });
+    });
+
+    console.log(
+      `[DepositScanner] Auto-credited ${xnrtAmount} XNRT to user ${userId}`
+    );
+
+    // Send notification (non-blocking)
+    void sendDepositNotification(userId, xnrtAmount, txHash).catch((err) => {
+      console.error("[DepositScanner] Notification error:", err);
+    });
   } catch (error) {
     console.error("[DepositScanner] Linked deposit processing error:", error);
   }

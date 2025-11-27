@@ -1,5 +1,5 @@
-import nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
+// server/services/email.ts
+import nodemailer, { type Transporter, type SendMailOptions } from 'nodemailer';
 import {
   generateVerificationEmail,
   generatePasswordResetEmail,
@@ -9,154 +9,162 @@ import {
   generateWelcomeEmail,
 } from '../email/templates';
 
-const SMTP_HOST = 'smtp-relay.brevo.com';
-const SMTP_PORT = 587;
-const SMTP_USER = '95624d002@smtp-brevo.com';
-const SMTP_PASS = process.env.SMTP_PASSWORD;
-const FROM_EMAIL = 'NextGen Rise Foundation <noreply@xnrt.org>';
+// ---- Config from ENV ----
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+const SMTP_PORT = Number(process.env.SMTP_PORT || '587');
+const SMTP_USER = process.env.SMTP_USER || '95624d002@smtp-brevo.com';
+// Support both names, prefer SMTP_PASSWORD if present
+const SMTP_PASS = process.env.SMTP_PASSWORD || process.env.SMTP_KEY || '';
+
+const FROM_EMAIL = process.env.FROM_EMAIL || 'XNRT <noreply@xnrt.org>';
+const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
 let transporter: Transporter | null = null;
 
-function getTransporter(): Transporter {
-  if (!transporter) {
-    if (!SMTP_PASS) {
-      throw new Error('SMTP_PASSWORD environment variable is not set');
-    }
-
-    console.log('[EMAIL] Initializing SMTP transporter', {
-      host: SMTP_HOST,
-      port: SMTP_PORT,
+// ---- Transporter setup ----
+if (!SMTP_PASS) {
+  console.warn(
+    '[email] SMTP_PASSWORD/SMTP_KEY not configured, emails will NOT be sent.',
+  );
+} else {
+  transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465, // 587 = false, 465 = true
+    auth: {
       user: SMTP_USER,
-      from: FROM_EMAIL,
-    });
-
-    transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: false, // use STARTTLS
-      auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS,
-      },
-    });
-  }
-
-  return transporter;
-}
-
-interface SendEmailOptions {
-  to: string;
-  subject: string;
-  html: string;
-  text?: string;
-}
-
-export async function sendEmail(options: SendEmailOptions): Promise<void> {
-  const transport = getTransporter();
-  const start = Date.now();
-
-  console.log('[EMAIL] sending', {
-    to: options.to,
-    subject: options.subject,
-    at: new Date().toISOString(),
+      pass: SMTP_PASS,
+    },
   });
+}
+
+async function sendMail(options: SendMailOptions) {
+  if (!transporter) {
+    console.warn('[email] Skipping send (no transporter):', options.subject);
+    return;
+  }
 
   try {
-    await transport.sendMail({
-      from: FROM_EMAIL,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
-      text: options.text || options.html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
-    });
-
-    console.log('[EMAIL] sent', {
-      to: options.to,
-      subject: options.subject,
-      ms: Date.now() - start,
-      at: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('[EMAIL] send failed', {
-      to: options.to,
-      subject: options.subject,
-      ms: Date.now() - start,
-      at: new Date().toISOString(),
-      error,
-    });
-    throw error;
+    await transporter.sendMail(options);
+  } catch (err) {
+    console.error('[email] Failed to send email:', options.subject, err);
+    throw err;
   }
 }
 
-export async function sendVerificationEmail(email: string, username: string, token: string): Promise<void> {
-  const baseUrl = process.env.APP_URL || 'https://xnrt.org';
+// ------------------------------------------------------------------
+// PUBLIC EMAIL HELPERS
+// ------------------------------------------------------------------
 
-  await sendEmail({
+export async function sendVerificationEmail(
+  email: string,
+  username: string,
+  token: string,
+) {
+  const html = generateVerificationEmail(email, token, APP_URL);
+
+  await sendMail({
+    from: FROM_EMAIL,
     to: email,
-    subject: 'Verify Your Email - XNRT Platform',
-    html: generateVerificationEmail(email, token, baseUrl),
+    subject: 'Verify your XNRT email address',
+    html,
   });
 }
 
-export async function sendPasswordResetEmail(email: string, username: string, token: string): Promise<void> {
-  const baseUrl = process.env.APP_URL || 'https://xnrt.org';
+export async function sendPasswordResetEmail(
+  email: string,
+  username: string,
+  token: string,
+) {
+  // 👇 this matches templates.ts: (email, token, baseUrl)
+  const html = generatePasswordResetEmail(email, token, APP_URL);
 
-  await sendEmail({
+  await sendMail({
+    from: FROM_EMAIL,
     to: email,
-    subject: 'Reset Your Password - XNRT Platform',
-    html: generatePasswordResetEmail(email, token, baseUrl),
+    subject: 'Reset your XNRT password',
+    html,
   });
 }
 
-export async function sendWelcomeEmail(email: string, username: string): Promise<void> {
-  const baseUrl = process.env.APP_URL || 'https://xnrt.org';
-
-  await sendEmail({
-    to: email,
-    subject: 'Welcome to XNRT - Start Earning Today!',
-    html: generateWelcomeEmail(email, username, baseUrl),
-  });
-}
-
-export async function sendDepositConfirmation(
+export async function sendDepositConfirmationEmail(
   email: string,
   amount: number,
   xnrtAmount: number,
   txHash: string,
-  confirmations: number
-): Promise<void> {
-  await sendEmail({
+  confirmations: number,
+) {
+  const html = generateDepositConfirmationEmail(
+    email,
+    amount,
+    xnrtAmount,
+    txHash,
+    confirmations,
+  );
+
+  await sendMail({
+    from: FROM_EMAIL,
     to: email,
-    subject: `Deposit Confirmed: ${amount} USDT → ${xnrtAmount.toLocaleString()} XNRT`,
-    html: generateDepositConfirmationEmail(email, amount, xnrtAmount, txHash, confirmations),
+    subject: 'Your XNRT deposit is confirmed',
+    html,
   });
 }
 
-export async function sendWithdrawalNotification(
+export async function sendWithdrawalNotificationEmail(
   email: string,
   amount: number,
   usdtAmount: number,
   status: 'pending' | 'approved' | 'rejected',
-  walletAddress?: string
-): Promise<void> {
-  const statusText = status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Pending';
+  walletAddress?: string,
+) {
+  const html = generateWithdrawalNotificationEmail(
+    email,
+    amount,
+    usdtAmount,
+    status,
+    walletAddress,
+  );
 
-  await sendEmail({
+  await sendMail({
+    from: FROM_EMAIL,
     to: email,
-    subject: `Withdrawal ${statusText}: ${amount.toLocaleString()} XNRT`,
-    html: generateWithdrawalNotificationEmail(email, amount, usdtAmount, status, walletAddress),
+    subject: `Withdrawal ${status === 'approved'
+      ? 'approved'
+      : status === 'rejected'
+      ? 'rejected'
+      : 'pending'}`,
+    html,
   });
 }
 
-export async function sendAchievementUnlock(
+export async function sendAchievementUnlockEmail(
   email: string,
   achievementName: string,
   achievementDescription: string,
-  xpReward: number
-): Promise<void> {
-  await sendEmail({
+  xpReward: number,
+) {
+  const html = generateAchievementUnlockEmail(
+    email,
+    achievementName,
+    achievementDescription,
+    xpReward,
+  );
+
+  await sendMail({
+    from: FROM_EMAIL,
     to: email,
-    subject: `🏆 Achievement Unlocked: ${achievementName}`,
-    html: generateAchievementUnlockEmail(email, achievementName, achievementDescription, xpReward),
+    subject: `Achievement unlocked: ${achievementName}`,
+    html,
+  });
+}
+
+export async function sendWelcomeEmail(email: string, username: string) {
+  const html = generateWelcomeEmail(email, username, APP_URL);
+
+  await sendMail({
+    from: FROM_EMAIL,
+    to: email,
+    subject: 'Welcome to XNRT 🚀',
+    html,
   });
 }

@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import type { ApiError } from "./authUtils";
 
 // CSRF token storage
 let csrfToken: string | null = null;
@@ -19,7 +20,16 @@ export async function initCSRFToken() {
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+
+    const error: ApiError = Object.assign(
+      new Error(`${res.status}: ${text}`),
+      {
+        status: res.status,
+        code: res.status === 401 ? "UNAUTHORIZED" : undefined,
+      }
+    );
+
+    throw error;
   }
 }
 
@@ -29,9 +39,15 @@ export async function apiRequest(
   data?: unknown | undefined,
 ): Promise<Response> {
   const headers: HeadersInit = data ? { "Content-Type": "application/json" } : {};
-  
+
   // Add CSRF token for mutations
-  if (csrfToken && (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE")) {
+  if (
+    csrfToken &&
+    (method === "POST" ||
+      method === "PUT" ||
+      method === "PATCH" ||
+      method === "DELETE")
+  ) {
     headers["x-csrf-token"] = csrfToken;
   }
 
@@ -47,22 +63,25 @@ export async function apiRequest(
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
-export const getQueryFn: <T>(options: {
+
+export function getQueryFn<T>(options: {
   on401: UnauthorizedBehavior;
-}) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
+}): QueryFunction<T> {
+  const { on401: unauthorizedBehavior } = options;
+
+  return async ({ queryKey }) => {
     const res = await fetch(queryKey.join("/") as string, {
       credentials: "include",
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+      return null as T;
     }
 
     await throwIfResNotOk(res);
-    return await res.json();
+    return (await res.json()) as T;
   };
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: {
