@@ -32,6 +32,9 @@ import {
 
 const prisma = new PrismaClient();
 
+const DEFAULT_MINING_BASE_REWARD = 20; // default XP per session
+const XP_TO_XNRT_RATE = 0.5; // 1 XP → 0.5 XNRT
+
 function generateReferralCode(): string {
   return `XNRT${nanoid(8).toUpperCase()}`;
 }
@@ -146,9 +149,20 @@ function convertPrismaActivity(activity: any): Activity {
 }
 
 function convertPrismaNotification(notification: any): Notification {
+  let metadata = notification.metadata;
+
+  // If stored as JSON string, try to parse back to object
+  if (typeof metadata === "string") {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      // ignore parse errors, keep raw string
+    }
+  }
+
   return {
     ...notification,
-    metadata: notification.metadata || undefined,
+    metadata: metadata ?? undefined,
   } as Notification;
 }
 
@@ -363,10 +377,11 @@ export class DatabaseStorage implements IStorage {
           message: `${
             user.username || "A new user"
           } just joined using your referral code!`,
-          metadata: JSON.stringify({
+          // pass plain object; createNotification handles stringify
+          metadata: {
             referredUserId: user.id,
             referredUsername: user.username,
-          }) as any,
+          } as any,
         });
 
         // Check and unlock referral achievements for the referrer
@@ -671,21 +686,22 @@ export class DatabaseStorage implements IStorage {
       if (!session.endTime) continue;
 
       const endTime = new Date(session.endTime);
-      if (now < endTime) continue;
+      if (now < endTime) continue; // still running
 
-      const baseReward = session.baseReward ?? 10;
+      const baseReward = session.baseReward ?? DEFAULT_MINING_BASE_REWARD;
       const boostPercentage = session.boostPercentage ?? 0;
+
       const finalReward =
         session.finalReward ??
         (baseReward + Math.floor((baseReward * boostPercentage) / 100));
 
       const xpReward = finalReward;
-      const xnrtReward = finalReward * 0.5;
+      const xnrtReward = finalReward * XP_TO_XNRT_RATE;
 
       await this.updateMiningSession(session.id, {
         status: "completed",
         finalReward,
-        endTime: now,
+        endTime: now, // keep behaviour: completion time is when processor runs
       });
 
       const user = await this.getUser(session.userId);
@@ -752,14 +768,15 @@ export class DatabaseStorage implements IStorage {
     });
 
     if (session && session.endTime && new Date() >= new Date(session.endTime)) {
-      const baseReward = session.baseReward ?? 10;
+      const baseReward = session.baseReward ?? DEFAULT_MINING_BASE_REWARD;
       const boostPercentage = session.boostPercentage ?? 0;
+
       const finalReward =
         session.finalReward ??
         (baseReward + Math.floor((baseReward * boostPercentage) / 100));
 
       const xpReward = finalReward;
-      const xnrtReward = finalReward * 0.5;
+      const xnrtReward = finalReward * XP_TO_XNRT_RATE;
 
       await this.updateMiningSession(session.id, {
         status: "completed",
@@ -823,7 +840,7 @@ export class DatabaseStorage implements IStorage {
       defaultEndTime.getTime() + 60 * 60 * 1000
     );
 
-    const base = session.baseReward ?? 10;
+    const base = session.baseReward ?? DEFAULT_MINING_BASE_REWARD;
     const boost = session.boostPercentage ?? 0;
     const computedFinal =
       base + Math.floor((base * boost) / 100);
@@ -1051,11 +1068,12 @@ export class DatabaseStorage implements IStorage {
           2
         )} XNRT commission from a level ${level} referral`,
         url: "/referrals",
-        metadata: JSON.stringify({
+        // pass plain object; notifications module / createNotification will stringify
+        metadata: {
           amount: commission.toString(),
           level,
           referredUserId: userId,
-        }) as any,
+        } as any,
       }).catch((err) => {
         console.error(
           "Error sending referral commission notification (non-blocking):",
@@ -1502,11 +1520,12 @@ export class DatabaseStorage implements IStorage {
       read: notification.read || false,
     };
 
-    if (
-      notification.metadata !== undefined &&
-      notification.metadata !== null
-    ) {
-      data.metadata = JSON.stringify(notification.metadata);
+    // Expect metadata as a plain object or value; stringify only if not already a JSON string
+    if (notification.metadata !== undefined && notification.metadata !== null) {
+      data.metadata =
+        typeof notification.metadata === "string"
+          ? notification.metadata
+          : JSON.stringify(notification.metadata);
     }
 
     const newNotification = await prisma.notification.create({ data });
@@ -1697,6 +1716,7 @@ export class DatabaseStorage implements IStorage {
     const now = new Date();
     let startDate: Date | null = null;
 
+    // Determine time window
     switch (period) {
       case "daily":
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1718,6 +1738,7 @@ export class DatabaseStorage implements IStorage {
         break;
     }
 
+    // ---------------- Overall leaderboard (pure XP) ----------------
     if (category === "overall") {
       const users = await prisma.user.findMany({
         select: {
@@ -1783,6 +1804,7 @@ export class DatabaseStorage implements IStorage {
       return { leaderboard, userPosition };
     }
 
+    // ---------------- Category leaderboards ----------------
     const typeFilter =
       category === "mining"
         ? "mining"
@@ -1817,11 +1839,24 @@ export class DatabaseStorage implements IStorage {
         });
 
         let categoryXp = 0;
+
         for (const activity of activities) {
           const desc = activity.description || "";
-          const xpMatch = desc.match(/(\d+)\s*XP/i);
-          if (xpMatch) {
-            categoryXp += parseInt(xpMatch[1], 10);
+
+          if (category === "mining") {
+            // For mining: rank by XP mentioned in description
+            // e.g. "earned 20 XP and 10 XNRT"
+            const xpMatch = desc.match(/(\d+)\s*XP/i);
+            if (xpMatch) {
+              categoryXp += parseInt(xpMatch[1], 10);
+            }
+          } else {
+            // For staking & referral: rank by XNRT earned from description
+            // e.g. "Earned 12.34 XNRT from staking", "Earned 5.00 XNRT commission..."
+            const xnrtMatch = desc.match(/([\d.]+)\s*XNRT/i);
+            if (xnrtMatch) {
+              categoryXp += parseFloat(xnrtMatch[1]);
+            }
           }
         }
 
@@ -1835,6 +1870,7 @@ export class DatabaseStorage implements IStorage {
       })
     );
 
+    // Sort by category "score" (XP or XNRT depending on category)
     userXPData.sort((a, b) => b.categoryXp - a.categoryXp);
 
     const leaderboard = userXPData.slice(0, 10).map((user, index) => {

@@ -1244,6 +1244,14 @@ Issued: ${issuedAt}`;
             console.error("[ReportDeposit] Notification error:", err);
           });
 
+          // Distribute referral commissions + activity for auto-approved deposit
+          await storage.distributeReferralCommissions(userId, xnrtAmount);
+          await storage.createActivity({
+            userId,
+            type: "deposit_approved",
+            description: `Deposit of ${xnrtAmount.toLocaleString()} XNRT approved via auto-detection`,
+          });
+
           return res.json({
             message: "Deposit verified and credited automatically!",
             credited: true,
@@ -1256,11 +1264,15 @@ Issued: ${issuedAt}`;
               toAddress: treasuryAddress,
               amount: new Prisma.Decimal(usdtAmount),
               txHash: transactionHash,
-              blockNumber: receipt?.blockNumber || 0,
-              confirmations: verification.confirmations,
-              reportedByUserId: userId,
+              reason:
+                typeof description === "string" && description.trim().length > 0
+                  ? description.trim()
+                  : `Verified on-chain but wallet not linked (from: ${
+                      fromAddress || "unknown"
+                    }) - ${verification.reason || "no reason"}`,
+              confirmations: verification.confirmations ?? 0,
               resolved: false,
-            } as any,
+            },
           });
 
           return res.json({
@@ -2546,6 +2558,14 @@ Issued: ${issuedAt}`;
           });
         });
 
+        // Referral commissions + activity for matched deposit
+        await storage.distributeReferralCommissions(userId, xnrtAmount);
+        await storage.createActivity({
+          userId,
+          type: "deposit_approved",
+          description: `Deposit of ${xnrtAmount.toLocaleString()} XNRT approved via manual match`,
+        });
+
         res.json({
           message: "Deposit matched and credited successfully",
         });
@@ -2656,6 +2676,17 @@ Issued: ${issuedAt}`;
                 notes: adminNotes || null,
               },
             });
+          });
+
+          // Referral commissions + activity for approved report
+          await storage.distributeReferralCommissions(
+            report.userId!,
+            xnrtAmount
+          );
+          await storage.createActivity({
+            userId: report.userId!,
+            type: "deposit_approved",
+            description: `Deposit of ${xnrtAmount.toLocaleString()} XNRT approved from deposit report`,
           });
         } else {
           await prisma.depositReport.update({

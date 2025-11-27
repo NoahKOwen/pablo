@@ -16,13 +16,17 @@ import { isUnauthorizedError, handleUnauthorized } from "@/lib/authUtils";
 import { useAuth } from "@/hooks/useAuth";
 import { nf } from "@/lib/number";
 
-const XP_TO_XNRT_RATE = 0.5;
+const MINING_XP_PER_SESSION = 20;
+const XNRT_PER_XP = 0.5;
+const DEFAULT_MINING_XNRT_PER_SESSION = MINING_XP_PER_SESSION * XNRT_PER_XP;
+
+type MiningCurrentResponse = MiningSession | { nextAvailable: string };
 
 export default function Mining() {
   const { toast } = useToast();
-  const { user } = useAuth(); // (still available if you ever want per-user tweaks)
+  const { user } = useAuth(); // still available if you ever want per-user tweaks
 
-  const { data: currentSession } = useQuery<MiningSession>({
+  const { data: currentMining } = useQuery<MiningCurrentResponse>({
     queryKey: ["/api/mining/current"],
     refetchInterval: 5000,
     staleTime: 3000,
@@ -36,6 +40,14 @@ export default function Mining() {
     refetchOnWindowFocus: false,
   });
 
+  // Narrow the union to an actual session when present
+  const activeSession =
+    currentMining &&
+    "status" in currentMining &&
+    currentMining.status === "active"
+      ? currentMining
+      : null;
+
   // Process mining rewards automatically on interval
   const processRewardsMutation = useMutation({
     mutationFn: async () => {
@@ -45,6 +57,11 @@ export default function Mining() {
       queryClient.invalidateQueries({ queryKey: ["/api/mining/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/mining/history"] });
       queryClient.invalidateQueries({ queryKey: ["/api/balance"] });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        handleUnauthorized(toast);
+      }
     },
   });
 
@@ -92,7 +109,7 @@ export default function Mining() {
   const lastSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!currentSession || currentSession.status !== "active") {
+    if (!activeSession) {
       hasInvalidatedRef.current = false;
       lastSessionIdRef.current = null;
       setTimeLeft("");
@@ -101,14 +118,14 @@ export default function Mining() {
     }
 
     // Reset flag when session ID changes (new session started)
-    if (currentSession.id !== lastSessionIdRef.current) {
+    if (activeSession.id !== lastSessionIdRef.current) {
       hasInvalidatedRef.current = false;
-      lastSessionIdRef.current = currentSession.id;
+      lastSessionIdRef.current = activeSession.id;
     }
 
-    const startMs = new Date(currentSession.startTime).getTime();
-    const endMs = currentSession.endTime
-      ? new Date(currentSession.endTime).getTime()
+    const startMs = new Date(activeSession.startTime).getTime();
+    const endMs = activeSession.endTime
+      ? new Date(activeSession.endTime).getTime()
       : startMs + 24 * 60 * 60 * 1000; // fallback: 24h window
     const totalMs = Math.max(endMs - startMs, 1);
 
@@ -142,11 +159,17 @@ export default function Mining() {
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [currentSession]);
+  }, [activeSession]);
 
-  const isSessionActive = currentSession?.status === "active";
+  const isSessionActive = !!activeSession;
   const isReady = !isSessionActive;
-  const baseReward = currentSession?.baseReward || 10;
+
+  const baseXpForPreview =
+    (activeSession?.finalReward as number | undefined) ??
+    MINING_XP_PER_SESSION;
+  const xnrtRewardPreview =
+    baseXpForPreview * XNRT_PER_XP || DEFAULT_MINING_XNRT_PER_SESSION;
+
   const startDisabled = startMiningMutation.isPending;
 
   const status = isSessionActive
@@ -272,35 +295,39 @@ export default function Mining() {
             )}
 
             {isReady && (
-              <div className="text-center space-y-2">
+              <div className="space-y-2 text-center">
                 <p className="text-lg font-semibold text-emerald-400">
                   Ready to Mine!
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Earn {nf(baseReward)} XP and{" "}
-                  {(baseReward * XP_TO_XNRT_RATE).toFixed(1)} XNRT automatically
-                  after 24 hours.
+                  Earn {MINING_XP_PER_SESSION} XP and{" "}
+                  {nf(xnrtRewardPreview)} XNRT automatically after 24 hours.
                 </p>
               </div>
             )}
 
             {/* reward summary */}
-            {isSessionActive && (
+            {isSessionActive && activeSession && (
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">
-                    Base Reward
+                    XP Reward
                   </span>
                   <span className="text-xl font-bold text-emerald-300">
-                    {nf(currentSession.baseReward)} XP
+                    {(activeSession.finalReward as number | undefined) ??
+                      MINING_XP_PER_SESSION}{" "}
+                    XP
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">
-                    XNRT Conversion
+                    XNRT Reward
                   </span>
                   <span className="text-xl font-bold text-emerald-300">
-                    {(currentSession.baseReward * XP_TO_XNRT_RATE).toFixed(1)}{" "}
+                    {nf(
+                      (((activeSession.finalReward as number | undefined) ??
+                        MINING_XP_PER_SESSION) as number) * XNRT_PER_XP,
+                    )}{" "}
                     XNRT
                   </span>
                 </div>
@@ -343,6 +370,11 @@ export default function Mining() {
                   : 24;
 
                 const isCompleted = session.status === "completed";
+                const baseXp =
+                  (session.finalReward as number | undefined) ??
+                  MINING_XP_PER_SESSION;
+                const xpReward = baseXp;
+                const xnrtReward = baseXp * XNRT_PER_XP;
 
                 return (
                   <div
@@ -407,14 +439,10 @@ export default function Mining() {
 
                       <div className="text-right">
                         <div className="text-sm font-bold text-emerald-300 sm:text-base">
-                          +{nf(session.finalReward)} XP
+                          +{xpReward} XP
                         </div>
                         <div className="text-[11px] text-muted-foreground sm:text-sm">
-                          +
-                          {(
-                            session.finalReward * XP_TO_XNRT_RATE
-                          ).toFixed(1)}{" "}
-                          XNRT
+                          +{nf(xnrtReward)} XNRT
                         </div>
                       </div>
                     </div>
