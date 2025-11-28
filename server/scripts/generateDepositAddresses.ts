@@ -1,5 +1,6 @@
 // server/scripts/generateDepositAddresses.ts
 
+import "dotenv/config";    
 import { PrismaClient } from "@prisma/client";
 import { deriveDepositAddress } from "../services/hdWallet";
 

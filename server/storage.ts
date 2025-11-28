@@ -82,8 +82,11 @@ function convertPrismaStake(stake: any): Stake {
     dailyRate: decimalToString(stake.dailyRate),
     totalProfit: decimalToString(stake.totalProfit),
     lastProfitDate: stake.lastProfitDate || undefined,
+
+    // Derived field for app type (Stake.has isLoan in shared/schema)
+    isLoan: !!(stake.loanProgram && stake.loanProgram.startsWith("trust_")),
+
     // Trust Loan / loan-related fields
-    isLoan: stake.isLoan,
     loanProgram: stake.loanProgram || undefined,
     unlockMet: stake.unlockMet,
     requiredReferrals: stake.requiredReferrals,
@@ -91,6 +94,7 @@ function convertPrismaStake(stake: any): Stake {
     minInvestUsdtPerReferral: decimalToString(stake.minInvestUsdtPerReferral),
   } as Stake;
 }
+
 
 function convertPrismaReferral(referral: any): Referral {
   return {
@@ -501,31 +505,29 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createStake(stake: InsertStake): Promise<Stake> {
-    const newStake = await prisma.stake.create({
-      data: {
-        userId: stake.userId,
-        tier: stake.tier,
-        amount: new Prisma.Decimal(stake.amount),
-        dailyRate: new Prisma.Decimal(stake.dailyRate),
-        duration: stake.duration,
-        startDate: stake.startDate || new Date(),
-        endDate: stake.endDate,
-        totalProfit: new Prisma.Decimal(stake.totalProfit || "0"),
-        lastProfitDate: stake.lastProfitDate,
-        status: stake.status || "active",
-        // Trust Loan fields
-        isLoan: stake.isLoan || false,
-        loanProgram: stake.loanProgram,
-        unlockMet: stake.unlockMet || false,
-        requiredReferrals: stake.requiredReferrals,
-        requiredInvestingReferrals: stake.requiredInvestingReferrals,
-        minInvestUsdtPerReferral: stake.minInvestUsdtPerReferral
-          ? new Prisma.Decimal(stake.minInvestUsdtPerReferral)
-          : undefined,
-      },
-    });
-    return convertPrismaStake(newStake);
-  }
+  const newStake = await prisma.stake.create({
+    data: {
+      userId: stake.userId,
+      tier: stake.tier,
+      amount: new Prisma.Decimal(stake.amount),
+      dailyRate: new Prisma.Decimal(stake.dailyRate),
+      duration: stake.duration,
+      startDate: stake.startDate || new Date(),
+      endDate: stake.endDate,
+      totalProfit: new Prisma.Decimal(stake.totalProfit || "0"),
+      lastProfitDate: stake.lastProfitDate,
+      status: stake.status || "active",
+      loanProgram: stake.loanProgram,
+      unlockMet: stake.unlockMet || false,
+      requiredReferrals: stake.requiredReferrals,
+      requiredInvestingReferrals: stake.requiredInvestingReferrals,
+      minInvestUsdtPerReferral: stake.minInvestUsdtPerReferral
+        ? new Prisma.Decimal(stake.minInvestUsdtPerReferral)
+        : undefined,
+    },
+  });
+  return convertPrismaStake(newStake);
+}
 
   async updateStake(id: string, updates: Partial<Stake>): Promise<Stake> {
     const data: any = {};

@@ -9,45 +9,41 @@ datasource db {
 }
 
 model User {
-  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  email                    String    @unique(map: "User_email_unique") @db.VarChar
-  username                 String    @unique(map: "User_username_unique") @db.VarChar
-  passwordHash             String    @db.VarChar
-  referralCode             String    @unique(map: "User_referralCode_unique") @db.VarChar
-  referredBy               String?   @db.VarChar
-  emailVerified            Boolean   @default(false)
-  emailVerificationToken   String?   @db.VarChar
-  emailVerificationExpires DateTime? @db.Timestamp(6)
-  isAdmin                  Boolean   @default(false)
-  xp                       Int       @default(0)
-  level                    Int       @default(1)
-  streak                   Int       @default(0)
-  lastCheckIn              DateTime? @db.Timestamp(6)
-
-  // --- ADDED FIELDS ---
-  depositAddress  String? @unique(map: "User_depositAddress_unique") @db.VarChar
-  derivationIndex Int?
-
-  createdAt         DateTime           @default(now()) @db.Timestamp(6)
-  updatedAt         DateTime           @default(now()) @updatedAt @db.Timestamp(6)
-  activities        Activity[]
-  announcements     Announcement[]
-  balance           Balance?
-  miningSessions    MiningSession[]
-  notifications     Notification[]
-  passwordResets    PasswordReset[]
-  pushSubscriptions PushSubscription[]
-  referralsReceived Referral[]         @relation("Referred")
-  referralsGiven    Referral[]         @relation("Referrer")
-  sessions          Session[]
-  stakes            Stake[]
-  transactions      Transaction[]
-  userAchievements  UserAchievement[]
-  userTasks         UserTask[]
-  linkedWallets     LinkedWallet[]
-  walletNonces      WalletNonce[]
-  // --- ADDED RELATION for DepositReport ---
-  DepositReports    DepositReport[]
+  id                       String             @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  email                    String             @unique(map: "User_email_unique") @db.VarChar
+  username                 String             @unique(map: "User_username_unique") @db.VarChar
+  passwordHash             String             @db.VarChar
+  referralCode             String             @unique(map: "User_referralCode_unique") @db.VarChar
+  referredBy               String?            @db.VarChar
+  emailVerified            Boolean            @default(false)
+  emailVerificationToken   String?            @db.VarChar
+  emailVerificationExpires DateTime?          @db.Timestamp(6)
+  isAdmin                  Boolean            @default(false)
+  xp                       Int                @default(0)
+  level                    Int                @default(1)
+  streak                   Int                @default(0)
+  lastCheckIn              DateTime?          @db.Timestamp(6)
+  createdAt                DateTime           @default(now()) @db.Timestamp(6)
+  updatedAt                DateTime           @default(now()) @updatedAt @db.Timestamp(6)
+  depositAddress           String?            @unique(map: "User_depositAddress_unique") @db.VarChar
+  derivationIndex          Int?
+  activities               Activity[]
+  announcements            Announcement[]
+  balance                  Balance?
+  DepositReports           DepositReport[]
+  linkedWallets            LinkedWallet[]
+  miningSessions           MiningSession[]
+  notifications            Notification[]
+  passwordResets           PasswordReset[]
+  pushSubscriptions        PushSubscription[]
+  referralsReceived        Referral[]         @relation("Referred")
+  referralsGiven           Referral[]         @relation("Referrer")
+  sessions                 Session[]
+  stakes                   Stake[]
+  transactions             Transaction[]
+  userAchievements         UserAchievement[]
+  userTasks                UserTask[]
+  walletNonces             WalletNonce[]
 }
 
 model Session {
@@ -76,27 +72,25 @@ model Balance {
 }
 
 model Stake {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  userId         String    @db.VarChar
-  tier           String    @db.VarChar
-  amount         Decimal   @db.Decimal(38, 18)
-  dailyRate      Decimal   @db.Decimal(8, 6)
-  duration       Int
-  startDate      DateTime  @default(now()) @db.Timestamp(6)
-  endDate        DateTime  @db.Timestamp(6)
-  totalProfit    Decimal   @default(0) @db.Decimal(38, 18)
-  lastProfitDate DateTime? @db.Timestamp(6)
-  status         String    @default("active") @db.VarChar
-  createdAt      DateTime  @default(now()) @db.Timestamp(6)
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "Stake_userId_User_id_fk")
-
-  // ---- Trust Loan fields (NEW) ----
-  isLoan                     Boolean  @default(false)
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  userId                     String    @db.VarChar
+  tier                       String    @db.VarChar
+  amount                     Decimal   @db.Decimal(38, 18)
+  dailyRate                  Decimal   @db.Decimal(8, 6)
+  duration                   Int
+  startDate                  DateTime  @default(now()) @db.Timestamp(6)
+  endDate                    DateTime  @db.Timestamp(6)
+  totalProfit                Decimal   @default(0) @db.Decimal(38, 18)
+  lastProfitDate             DateTime? @db.Timestamp(6)
+  status                     String    @default("active") @db.VarChar
+  createdAt                  DateTime  @default(now()) @db.Timestamp(6)
+  isLoan                     Boolean   @default(false)
   loanProgram                String?
-  unlockMet                  Boolean  @default(false)
-  requiredReferrals          Int      @default(10)
-  requiredInvestingReferrals Int      @default(3)
-  minInvestUsdtPerReferral   Decimal  @default(50.0) @db.Decimal(38, 18)
+  minInvestUsdtPerReferral   Decimal   @default(50.0) @db.Decimal(38, 18)
+  requiredInvestingReferrals Int       @default(3)
+  requiredReferrals          Int       @default(10)
+  unlockMet                  Boolean   @default(false)
+  user                       User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "Stake_userId_User_id_fk")
 
   @@index([status], map: "stakes_status_idx")
   @@index([userId, createdAt], map: "stakes_userId_createdAt_idx")
@@ -211,17 +205,14 @@ model UserAchievement {
   userId        String      @db.VarChar
   achievementId String      @db.VarChar
   unlockedAt    DateTime    @default(now()) @db.Timestamp(6)
-
-  // --- CLAIM FIELDS ---
   claimed       Boolean     @default(false)
   claimedAt     DateTime?   @db.Timestamp(6)
-
   achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "UserAchievement_achievementId_Achievement_id_fk")
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "UserAchievement_userId_User_id_fk")
 
+  @@unique([userId, achievementId], map: "user_achievements_user_achievement_unique")
   @@index([achievementId], map: "user_achievements_achievementId_idx")
   @@index([userId], map: "user_achievements_userId_idx")
-  @@unique([userId, achievementId], map: "user_achievements_user_achievement_unique")
 }
 
 model Activity {
@@ -305,17 +296,15 @@ model Announcement {
   @@index([isActive], map: "announcements_isActive_idx")
 }
 
-// --- UPDATED MODELS BELOW ---
-
 model LinkedWallet {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   userId    String   @db.VarChar
   address   String   @unique(map: "LinkedWallet_address_unique") @db.VarChar
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "LinkedWallet_userId_User_id_fk")
-  active    Boolean  @default(true)
-  signature String?  @db.VarChar
-  linkedAt  DateTime @default(now()) @db.Timestamp(6)
   createdAt DateTime @default(now()) @db.Timestamp(6)
+  active    Boolean  @default(true)
+  linkedAt  DateTime @default(now()) @db.Timestamp(6)
+  signature String?  @db.VarChar
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "LinkedWallet_userId_User_id_fk")
 
   @@index([userId], map: "linked_wallets_userId_idx")
 }
@@ -326,8 +315,8 @@ model WalletNonce {
   walletAddress String    @db.VarChar
   nonce         Int       @default(0)
   updatedAt     DateTime  @default(now()) @updatedAt @db.Timestamp(6)
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "WalletNonce_userId_User_id_fk")
   expiresAt     DateTime? @db.Timestamp(6)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "WalletNonce_userId_User_id_fk")
 
   @@unique([userId, walletAddress], map: "WalletNonce_userId_walletAddress_unique")
   @@index([userId], map: "wallet_nonces_userId_idx")
@@ -348,12 +337,10 @@ model DepositReport {
   status      String    @default("pending") @db.VarChar
   createdAt   DateTime  @default(now()) @db.Timestamp(6)
   processedAt DateTime? @db.Timestamp(6)
+  resolvedAt  DateTime? @db.Timestamp(6)
+  userId      String?   @db.VarChar
   notes       String?   @db.VarChar
-
-  // relation to User
-  userId     String?   @db.VarChar
-  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  resolvedAt DateTime? @db.Timestamp(6)
+  user        User?     @relation(fields: [userId], references: [id], onUpdate: NoAction)
 
   @@index([userId])
   @@index([toAddress], map: "deposit_reports_toAddress_idx")
@@ -361,17 +348,15 @@ model DepositReport {
 }
 
 model UnmatchedDeposit {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  txHash    String   @unique(map: "UnmatchedDeposit_txHash_unique") @db.VarChar
-  amount    Decimal  @db.Decimal(38, 18)
-  toAddress String   @db.VarChar
-  reason    String   @db.VarChar
-  resolved  Boolean  @default(false)
-  createdAt DateTime @default(now()) @db.Timestamp(6)
-
-  // --- ADDED FIELDS ---
-  fromAddress   String? @db.VarChar
-  confirmations Int?    @default(0)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  txHash        String   @unique(map: "UnmatchedDeposit_txHash_unique") @db.VarChar
+  amount        Decimal  @db.Decimal(38, 18)
+  toAddress     String   @db.VarChar
+  reason        String   @db.VarChar
+  resolved      Boolean  @default(false)
+  createdAt     DateTime @default(now()) @db.Timestamp(6)
+  confirmations Int?     @default(0)
+  fromAddress   String?  @db.VarChar
 
   @@index([toAddress], map: "unmatched_deposits_toAddress_idx")
   @@index([resolved], map: "unmatched_deposits_resolved_idx")

@@ -1,16 +1,29 @@
+// server/services/verifyBscUsdt.ts
 import { ethers } from "ethers";
 
-const provider = new ethers.JsonRpcProvider(process.env.RPC_BSC_URL);
+// Reuse BSC RPC + USDT envs same as depositScanner
+const RPC_URL = process.env.RPC_BSC_URL || "";
+const USDT_ADDRESS = (process.env.USDT_BSC_ADDRESS || "").toLowerCase();
+
+if (!RPC_URL) {
+  console.warn(
+    "[verifyBscUsdt] RPC_BSC_URL not set; on-chain verification will always fail."
+  );
+}
+
+if (!USDT_ADDRESS) {
+  console.warn(
+    "[verifyBscUsdt] USDT_BSC_ADDRESS not set; on-chain verification will always fail."
+  );
+}
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 const USDT_ABI = [
   "event Transfer(address indexed from, address indexed to, uint256 value)",
 ];
 
-const usdt = new ethers.Contract(
-  process.env.USDT_BSC_ADDRESS!,
-  USDT_ABI,
-  provider,
-);
+const usdt = new ethers.Contract(USDT_ADDRESS, USDT_ABI, provider);
 
 export type VerifyResult = {
   verified: boolean;
@@ -58,6 +71,14 @@ export async function verifyBscUsdtDeposit(params: {
   }
   // ---------------------------------------
 
+  if (!RPC_URL || !USDT_ADDRESS) {
+    return {
+      verified: false,
+      confirmations: 0,
+      reason: "RPC_BSC_URL or USDT_BSC_ADDRESS not configured",
+    };
+  }
+
   try {
     const need =
       params.requiredConf ?? Number(process.env.BSC_CONFIRMATIONS ?? 12);
@@ -71,6 +92,7 @@ export async function verifyBscUsdtDeposit(params: {
       };
     }
 
+    // status 1 = success, 0 = reverted / failed
     if (receipt.status !== 1) {
       const currentBlock = await provider.getBlockNumber();
       const conf = currentBlock - (receipt.blockNumber ?? 0);
@@ -85,10 +107,7 @@ export async function verifyBscUsdtDeposit(params: {
     let totalToExpected = BigInt(0);
 
     for (const log of receipt.logs) {
-      if (
-        log.address.toLowerCase() !==
-        process.env.USDT_BSC_ADDRESS!.toLowerCase()
-      ) {
+      if (log.address.toLowerCase() !== USDT_ADDRESS) {
         continue;
       }
 
@@ -151,6 +170,19 @@ export async function verifyBscUsdtDeposit(params: {
       amountOnChain: amountFloat,
     };
   } catch (e: any) {
+    // Thora sa cleaner error message
+    if (
+      e?.code === "BAD_DATA" &&
+      typeof e?.shortMessage === "string" &&
+      e.shortMessage.includes("rate limit")
+    ) {
+      return {
+        verified: false,
+        confirmations: 0,
+        reason: "RPC rate limited (eth_getLogs / receipt). Try again later.",
+      };
+    }
+
     return {
       verified: false,
       confirmations: 0,
